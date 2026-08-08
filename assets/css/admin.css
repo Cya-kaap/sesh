@@ -1,0 +1,1186 @@
+/* =========================================================
+   SESH - ADMIN PANEL
+   Main Admin Stylesheet
+========================================================= */
+
+
+/* =========================================================
+   RESET
+========================================================= */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+
+/* =========================================================
+   BASE
+========================================================= */
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    min-height: 100vh;
+
+    font-family: Arial, Helvetica, sans-serif;
+
+    background: #f4f4f0;
+
+    color: #111;
+
+    line-height: 1.5;
+}
+
+
+a {
+    text-decoration: none;
+
+    color: inherit;
+}
+
+
+button,
+input,
+select,
+textarea {
+    font-family: inherit;
+}
+
+
+/* =========================================================
+   SIDEBAR
+========================================================= */
+
+.sidebar {
+    position: fixed;
+
+    top: 0;
+    left: 0;
+
+    width: 250px;
+    height: 100vh;
+
+    padding: 30px 25px;
+
+    background: #111;
+
+    color: #fff;
+
+    display: flex;
+
+    flex-direction: column;
+
+    z-index: 100;
+}
+
+
+/* LOGO */
+
+.sidebar-logo {
+    margin-bottom: 60px;
+}
+
+
+.sidebar-logo a {
+    display: block;
+
+    font-size: 38px;
+
+    font-weight: 900;
+
+    line-height: 1;
+
+    letter-spacing: -4px;
+}
+
+
+.sidebar-logo span {
+    display: block;
+
+    margin-top: 10px;
+
+    font-size: 8px;
+
+    letter-spacing: 2px;
+
+    color: #777;
+
+    line-height: 1.4;
+}
+
+
+/* NAVIGATION */
+
+.sidebar-nav {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 5px;
+}
+
+
+.sidebar-nav a {
+    display: block;
+
+    padding: 15px;
+
+    font-size: 11px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+    color: #999;
+
+    transition:
+        background 0.2s ease,
+        color 0.2s ease;
+}
+
+
+.sidebar-nav a:hover {
+    background: #333;
+
+    color: #fff;
+}
+
+
+.sidebar-nav a.active {
+    background: #fff;
+
+    color: #111;
+}
+
+
+/* SIDEBAR BOTTOM */
+
+.sidebar-bottom {
+    margin-top: auto;
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 15px;
+}
+
+
+.sidebar-bottom a {
+    font-size: 10px;
+
+    letter-spacing: 1px;
+
+    color: #888;
+
+    transition: color 0.2s ease;
+}
+
+
+.sidebar-bottom a:hover {
+    color: #fff;
+}
+
+
+.sidebar-bottom .logout {
+    padding-top: 20px;
+
+    border-top: 1px solid #333;
+
+    color: #fff;
+}
+
+
+/* =========================================================
+   MAIN CONTENT
+========================================================= */
+
+.main-content {
+    width: calc(100% - 250px);
+
+    min-height: 100vh;
+
+    margin-left: 250px;
+
+    padding: 50px 6vw;
+}
+
+
+/* =========================================================
+   DASHBOARD HEADER
+========================================================= */
+
+.dashboard-header {
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: flex-end;
+
+    padding-bottom: 30px;
+
+    border-bottom: 1px solid #ccc;
+}
+
+
+.dashboard-label {
+    margin-bottom: 15px;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 2px;
+
+    color: #777;
+}
+
+
+.dashboard-header h1 {
+    font-size: 70px;
+
+    font-weight: 800;
+
+    line-height: 0.9;
+
+    letter-spacing: -4px;
+}
+
+
+.user-info {
+    text-align: right;
+}
+
+
+.user-info span {
+    display: block;
+
+    font-size: 9px;
+
+    letter-spacing: 1px;
+
+    color: #777;
+}
+
+
+.user-info strong {
+    display: block;
+
+    margin-top: 7px;
+
+    font-size: 14px;
+}
+
+
+/* =========================================================
+   WELCOME SECTION
+========================================================= */
+
+.welcome-section {
+    padding: 70px 0;
+}
+
+
+.welcome-section p {
+    font-size: 12px;
+
+    color: #777;
+}
+
+
+.welcome-section h2 {
+    margin: 10px 0;
+
+    font-size: 45px;
+
+    letter-spacing: -2px;
+}
+
+
+.welcome-section span {
+    font-size: 12px;
+
+    color: #777;
+}
+
+
+/* =========================================================
+   STATISTICS
+========================================================= */
+
+.stats-grid {
+    display: grid;
+
+    grid-template-columns: repeat(4, 1fr);
+
+    gap: 15px;
+}
+
+
+.stat-card {
+    min-height: 230px;
+
+    padding: 25px;
+
+    background: #fff;
+
+    border: 1px solid #ddd;
+
+    display: flex;
+
+    flex-direction: column;
+}
+
+
+.stat-number {
+    font-size: 65px;
+
+    font-weight: 800;
+
+    line-height: 1;
+
+    letter-spacing: -4px;
+}
+
+
+.stat-label {
+    margin-top: 8px;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 1.5px;
+
+    color: #777;
+}
+
+
+.stat-card a {
+    margin-top: auto;
+
+    font-size: 9px;
+
+    font-weight: 800;
+
+    letter-spacing: 1px;
+}
+
+
+.stat-card.pending {
+    background: #111;
+
+    color: #fff;
+}
+
+
+.stat-card.pending .stat-label {
+    color: #888;
+}
+
+
+.stat-card.approved {
+    background: #ddd;
+}
+
+
+/* =========================================================
+   ADMIN SECTION
+========================================================= */
+
+.admin-section {
+    margin-top: 130px;
+}
+
+
+.section-heading p {
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 2px;
+
+    color: #777;
+}
+
+
+.section-heading h2 {
+    margin-top: 15px;
+
+    font-size: 45px;
+
+    letter-spacing: -2px;
+}
+
+
+.admin-grid {
+    margin-top: 50px;
+
+    display: grid;
+
+    grid-template-columns: repeat(2, 1fr);
+
+    gap: 15px;
+}
+
+
+.admin-card {
+    position: relative;
+
+    min-height: 280px;
+
+    padding: 30px;
+
+    background: #fff;
+
+    border: 1px solid #ddd;
+
+    transition:
+        background 0.3s ease,
+        color 0.3s ease;
+}
+
+
+.admin-card:hover {
+    background: #111;
+
+    color: #fff;
+}
+
+
+.admin-card > span {
+    font-size: 9px;
+
+    color: #888;
+}
+
+
+.admin-card h3 {
+    margin-top: 60px;
+
+    font-size: 25px;
+
+    letter-spacing: -1px;
+}
+
+
+.admin-card p {
+    max-width: 400px;
+
+    margin-top: 15px;
+
+    font-size: 12px;
+
+    line-height: 1.7;
+
+    color: #777;
+}
+
+
+.admin-card:hover p {
+    color: #999;
+}
+
+
+.admin-card strong {
+    position: absolute;
+
+    right: 30px;
+
+    bottom: 30px;
+
+    font-size: 25px;
+}
+
+
+/* =========================================================
+   QUICK ACTIONS
+========================================================= */
+
+.quick-actions {
+    margin-top: 130px;
+
+    padding: 60px 0;
+
+    border-top: 1px solid #ccc;
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+}
+
+
+.quick-actions p {
+    font-size: 9px;
+
+    letter-spacing: 2px;
+
+    color: #777;
+}
+
+
+.quick-actions h2 {
+    margin-top: 10px;
+
+    font-size: 35px;
+
+    letter-spacing: -1px;
+}
+
+
+.action-buttons {
+    display: flex;
+
+    gap: 10px;
+}
+
+
+.action-buttons a {
+    padding: 14px 20px;
+
+    background: #111;
+
+    color: #fff;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+}
+
+
+.action-buttons a:hover {
+    background: #444;
+}
+
+
+/* =========================================================
+   ROOM MANAGEMENT
+========================================================= */
+
+.rooms-section {
+    margin-top: 65px;
+}
+
+
+/* ROOM HEADER */
+
+.room-heading {
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: flex-end;
+
+    gap: 30px;
+
+    padding-bottom: 30px;
+
+    border-bottom: 1px solid #ccc;
+}
+
+
+.section-label {
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 2px;
+
+    color: #777;
+}
+
+
+.room-heading h2 {
+    margin-top: 12px;
+
+    font-size: 45px;
+
+    font-weight: 800;
+
+    line-height: 1;
+
+    letter-spacing: -2px;
+}
+
+
+.section-description {
+    max-width: 550px;
+
+    margin-top: 15px;
+
+    font-size: 12px;
+
+    line-height: 1.7;
+
+    color: #777;
+}
+
+
+/* =========================================================
+   PRIMARY BUTTON
+========================================================= */
+
+.primary-button {
+    display: inline-flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    flex-shrink: 0;
+
+    padding: 15px 22px;
+
+    background: #111;
+
+    color: #fff;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+    text-transform: uppercase;
+
+    transition:
+        background 0.2s ease,
+        transform 0.2s ease;
+}
+
+
+.primary-button:hover {
+    background: #444;
+
+    transform: translateY(-1px);
+}
+
+
+/* =========================================================
+   ERROR MESSAGE
+========================================================= */
+
+.alert-error {
+    margin-top: 30px;
+
+    padding: 15px 18px;
+
+    background: #111;
+
+    color: #fff;
+
+    font-size: 11px;
+
+    border-left: 4px solid #777;
+}
+
+
+/* =========================================================
+   ROOM TABLE CONTAINER
+========================================================= */
+
+.rooms-table-container {
+    width: 100%;
+
+    margin-top: 40px;
+
+    overflow-x: auto;
+
+    background: #fff;
+
+    border: 1px solid #ddd;
+}
+
+
+/* =========================================================
+   ROOM TABLE
+========================================================= */
+
+.rooms-table {
+    width: 100%;
+
+    min-width: 800px;
+
+    border-collapse: collapse;
+
+    border-spacing: 0;
+}
+
+
+/* TABLE HEAD */
+
+.rooms-table thead {
+    background: #111;
+
+    color: #fff;
+}
+
+
+.rooms-table th {
+    padding: 18px 20px;
+
+    text-align: left;
+
+    white-space: nowrap;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 1.5px;
+
+    text-transform: uppercase;
+}
+
+
+/* TABLE BODY */
+
+.rooms-table td {
+    padding: 20px;
+
+    vertical-align: middle;
+
+    border-bottom: 1px solid #ddd;
+
+    font-size: 11px;
+
+    color: #555;
+}
+
+
+.rooms-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+
+.rooms-table tbody tr {
+    transition: background 0.2s ease;
+}
+
+
+.rooms-table tbody tr:hover {
+    background: #f5f5f2;
+}
+
+
+/* =========================================================
+   ROOM NAME
+========================================================= */
+
+.room-name {
+    font-size: 13px;
+
+    font-weight: 700;
+
+    color: #111;
+}
+
+
+.room-id {
+    margin-top: 4px;
+
+    font-size: 8px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+    color: #999;
+}
+
+
+/* =========================================================
+   ROOM TYPE
+========================================================= */
+
+.room-type {
+    font-size: 10px;
+
+    font-weight: 700;
+
+    letter-spacing: 0.5px;
+
+    color: #555;
+}
+
+
+/* =========================================================
+   CAPACITY
+========================================================= */
+
+.capacity {
+    font-size: 13px;
+
+    font-weight: 700;
+
+    color: #111;
+}
+
+
+.capacity-label {
+    margin-left: 4px;
+
+    font-size: 9px;
+
+    color: #999;
+}
+
+
+/* =========================================================
+   ROOM STATUS
+========================================================= */
+
+.room-status {
+    display: inline-block;
+
+    padding: 7px 10px;
+
+    font-size: 8px;
+
+    font-weight: 800;
+
+    letter-spacing: 1px;
+
+    text-transform: uppercase;
+
+    background: #eee;
+
+    color: #555;
+}
+
+
+.room-status.active {
+    background: #111;
+
+    color: #fff;
+}
+
+
+.room-status.inactive {
+    background: #ddd;
+
+    color: #666;
+}
+
+
+/* =========================================================
+   ROOM ACTIONS
+========================================================= */
+
+.room-actions {
+    display: flex;
+
+    align-items: center;
+
+    gap: 6px;
+
+    flex-wrap: wrap;
+}
+
+
+.table-button {
+    display: inline-flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    padding: 9px 12px;
+
+    border: 1px solid #ccc;
+
+    background: #fff;
+
+    color: #111;
+
+    font-size: 8px;
+
+    font-weight: 800;
+
+    letter-spacing: 1px;
+
+    text-transform: uppercase;
+
+    transition:
+        background 0.2s ease,
+        color 0.2s ease,
+        border-color 0.2s ease;
+}
+
+
+.table-button:hover {
+    background: #111;
+
+    border-color: #111;
+
+    color: #fff;
+}
+
+
+/* =========================================================
+   EMPTY STATE
+========================================================= */
+
+.empty-state {
+    margin-top: 40px;
+
+    padding: 70px 40px;
+
+    background: #fff;
+
+    border: 1px solid #ddd;
+
+    text-align: center;
+}
+
+
+.empty-label {
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 2px;
+
+    color: #777;
+}
+
+
+.empty-state h3 {
+    margin-top: 15px;
+
+    font-size: 30px;
+
+    line-height: 1.1;
+
+    letter-spacing: -1px;
+}
+
+
+.empty-state p {
+    max-width: 450px;
+
+    margin: 15px auto 30px;
+
+    font-size: 12px;
+
+    line-height: 1.7;
+
+    color: #777;
+}
+
+
+/* =========================================================
+   PAGE BOTTOM
+========================================================= */
+
+.page-bottom {
+    margin-top: 50px;
+
+    padding-top: 30px;
+
+    border-top: 1px solid #ccc;
+}
+
+
+.page-bottom a {
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 1px;
+
+    color: #777;
+
+    text-transform: uppercase;
+
+    transition: color 0.2s ease;
+}
+
+
+.page-bottom a:hover {
+    color: #111;
+}
+
+
+/* =========================================================
+   TABLET
+========================================================= */
+
+@media (max-width: 1100px) {
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+}
+
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 700px) {
+
+
+    /* SIDEBAR */
+
+    .sidebar {
+        position: relative;
+
+        width: 100%;
+
+        height: auto;
+
+        min-height: auto;
+
+        padding: 20px;
+    }
+
+
+    .sidebar-logo {
+        margin-bottom: 25px;
+    }
+
+
+    .sidebar-logo a {
+        font-size: 32px;
+    }
+
+
+    .sidebar-nav {
+        flex-direction: row;
+
+        gap: 5px;
+
+        overflow-x: auto;
+
+        padding-bottom: 5px;
+    }
+
+
+    .sidebar-nav a {
+        flex-shrink: 0;
+
+        white-space: nowrap;
+
+        padding: 12px;
+    }
+
+
+    .sidebar-bottom {
+        margin-top: 25px;
+    }
+
+
+    /* MAIN */
+
+    .main-content {
+        width: 100%;
+
+        margin-left: 0;
+
+        padding: 30px 20px;
+    }
+
+
+    /* HEADER */
+
+    .dashboard-header {
+        display: block;
+    }
+
+
+    .dashboard-header h1 {
+        font-size: 50px;
+    }
+
+
+    .user-info {
+        margin-top: 25px;
+
+        text-align: left;
+    }
+
+
+    /* STATS */
+
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+
+    /* ADMIN */
+
+    .admin-grid {
+        grid-template-columns: 1fr;
+    }
+
+
+    /* QUICK ACTIONS */
+
+    .quick-actions {
+        display: block;
+    }
+
+
+    .action-buttons {
+        margin-top: 30px;
+
+        flex-direction: column;
+    }
+
+
+    /* ROOMS */
+
+    .rooms-section {
+        margin-top: 45px;
+    }
+
+
+    .room-heading {
+        display: block;
+    }
+
+
+    .room-heading .primary-button {
+        margin-top: 25px;
+    }
+
+
+    .room-heading h2 {
+        font-size: 38px;
+    }
+
+
+    .rooms-table-container {
+        margin-top: 30px;
+    }
+
+
+    .room-actions {
+        flex-direction: column;
+
+        align-items: stretch;
+    }
+
+
+    .table-button {
+        width: 100%;
+
+        text-align: center;
+    }
+
+
+    .empty-state {
+        padding: 50px 20px;
+    }
+
+}

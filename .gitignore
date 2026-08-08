@@ -1,0 +1,61 @@
+# ==========================================
+# SESH - Session Management System
+# Git Ignore Configuration
+# ==========================================
+
+# ------------------------------------------
+# Environment / secrets
+# ------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ------------------------------------------
+# Local configuration
+# ------------------------------------------
+config/local.php
+
+# ------------------------------------------
+# IDE / Editor files
+# ------------------------------------------
+.vscode/
+.idea/
+
+# ------------------------------------------
+# Operating system files
+# ------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ------------------------------------------
+# Logs
+# ------------------------------------------
+*.log
+
+# ------------------------------------------
+# Temporary files
+# ------------------------------------------
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+php_errorlog
+
+# ------------------------------------------
+# Local database dumps / exports
+# ------------------------------------------
+*.sql
+!database/schema.sql
+!database/seed.sql
+
+# ==========================================
+# Local development / testing scripts
+# ==========================================
+create_admin.php
+generate_hash.php
+hash.php
+test.php
+test_connection.php
+test_header.php
