@@ -99,6 +99,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        // Format validation — runs before any logic that assumes a
+        // well-formed date/time string.
+        if ($values['date'] !== '' && !isValidDate($values['date'])) {
+            $errors[] = 'Invalid date format.';
+        }
+        if ($values['start_time'] !== '' && !isValidTime($values['start_time'])) {
+            $errors[] = 'Invalid start time format.';
+        }
+        if ($values['end_time'] !== '' && !isValidTime($values['end_time'])) {
+            $errors[] = 'Invalid end time format.';
+        }
+
         $selectedRoom = null;
 
         if (empty($errors)) {
@@ -160,28 +172,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = "Number of students ({$values['num_students']}) exceeds the room's capacity ({$selectedRoom['capacity']}).";
         }
 
-        // Conflict check — same room, same date, overlapping time,
-        // against any booking that hasn't been rejected/cancelled.
-        if (empty($errors)) {
-
-            $conflictStmt = $pdo->prepare("
-                SELECT COUNT(*) FROM bookings
-                WHERE room_id = :room_id
-                  AND date = :date
-                  AND status IN ('Pending', 'Approved')
-                  AND start_time < :end_time
-                  AND end_time > :start_time
-            ");
-            $conflictStmt->execute([
-                ':room_id'    => $values['room_id'],
-                ':date'       => $values['date'],
-                ':start_time' => $values['start_time'],
-                ':end_time'   => $values['end_time'],
-            ]);
-
-            if ((int) $conflictStmt->fetchColumn() > 0) {
-                $errors[] = 'This room is already booked during the selected time window. Choose a different room or time.';
-            }
+        // Conflict check — shared helper (includes/functions.php).
+        if (empty($errors) && hasBookingConflict($pdo, (int) $values['room_id'], $values['date'], $values['start_time'], $values['end_time'])) {
+            $errors[] = 'This room is already booked during the selected time window. Choose a different room or time.';
         }
 
         // Insert

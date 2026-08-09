@@ -5,7 +5,7 @@
  *
  * Purpose:
  *   Filterable table of all bookings within the Coordinator's
- *   programme scope, with cancel (status -> Rejected) actions.
+ *   programme scope, with approve, reject, and cancel actions.
  *   Editing is handled on a separate page (edit_booking.php).
  *
  * Requires tables:
@@ -15,14 +15,8 @@
  *   Coordinator only.
  *
  * Scope note:
- *   Same as coordinator/index.php — scope is derived by matching
- *   users.department to programmes.name.
- *
- * Cancel note:
- *   bookings.status has no 'Cancelled' value (enum is Pending,
- *   Approved, Rejected, Completed). "Cancel" here sets status to
- *   'Rejected' — the closest existing terminal state. Flag if you'd
- *   rather add a real 'Cancelled' value to the enum instead.
+ *   Same as coordinator/index.php — scope is derived by joining
+ *   users.programme_id to programmes.id.
  */
 
 require_once __DIR__ . '/../config/db.php';
@@ -34,12 +28,15 @@ requireRole(['Coordinator']);
 $user  = currentUser();
 $flash = getFlash();
 
-// Pull department fresh from the DB on every load - see the note in
-// coordinator/index.php and getCurrentDepartment() in functions.php.
-$department = getCurrentDepartment($pdo, (int) $user['id']);
-
-$programmeStmt = $pdo->prepare("SELECT id, name FROM programmes WHERE name = :dept LIMIT 1");
-$programmeStmt->execute([':dept' => $department ?? '']);
+// Resolve the coordinator's programme scope from their foreign key.
+$programmeStmt = $pdo->prepare("
+    SELECT p.id, p.name
+    FROM users u
+    JOIN programmes p ON p.id = u.programme_id
+    WHERE u.id = :id
+    LIMIT 1
+");
+$programmeStmt->execute([':id' => $user['id']]);
 $programme = $programmeStmt->fetch();
 
 if (!$programme) {
@@ -52,23 +49,18 @@ $statusOptions = getEnumValues($pdo, 'bookings', 'status');
 
 /*
 |--------------------------------------------------------------------------
-| Handle Cancel (status -> Rejected)
+| Handle Cancel (status -> Cancelled)
 |--------------------------------------------------------------------------
 */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'], $_POST['id']) && $_POST['action'] === 'cancel') {
 
     if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
-
         setFlash('error', 'Your session expired. Please try again.');
-
     } else {
-
         $bookingId = (int) $_POST['id'];
 
-        // Only allow cancelling bookings within this coordinator's own
-        // programme scope — never someone else's, regardless of the
-        // booking ID submitted.
+        // Only allow cancelling bookings within this coordinator's own programme scope
         $check = $pdo->prepare("
             SELECT status FROM bookings WHERE id = :id AND programme_id = :pid
         ");
@@ -81,10 +73,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'], $_POST['id'
             setFlash('error', 'Only pending or approved bookings can be cancelled.');
         } else {
             $update = $pdo->prepare("
-                UPDATE bookings SET status = 'Rejected', updated_at = NOW() WHERE id = :id
+                UPDATE bookings SET status = 'Cancelled', updated_at = NOW() WHERE id = :id
             ");
             $update->execute([':id' => $bookingId]);
             setFlash('success', 'Booking cancelled.');
+        }
+    }
+
+    header('Location: bookings.php' . (isset($_GET['status']) ? '?status=' . urlencode($_GET['status']) : ''));
+    exit;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Handle Approve / Reject (scoped to this Coordinator's own programme —
+| per the Role Matrix, Coordinator has full Approve/Reject access, but
+| only within bookings they manage.)
+|--------------------------------------------------------------------------
+*/
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'], $_POST['id']) && in_array($_POST['action'], ['approve', 'reject'], true)) {
+
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        setFlash('error', 'Your session expired. Please try again.');
+    } else {
+        $bookingId = (int) $_POST['id'];
+        $newStatus = $_POST['action'] === 'approve' ? 'Approved' : 'Rejected';
+
+        $check = $pdo->prepare("SELECT status, room_id, date, start_time, end_time FROM bookings WHERE id = :id AND programme_id = :pid");
+        $check->execute([':id' => $bookingId, ':pid' => $programme['id']]);
+        $current = $check->fetch();
+
+        if (!$current) {
+            setFlash('error', 'Booking not found in your programme scope.');
+        } elseif ($current['status'] !== 'Pending') {
+            setFlash('error', 'Only pending bookings can be approved or rejected.');
+        } elseif ($newStatus === 'Approved' && hasBookingConflict($pdo, (int) $current['room_id'], $current['date'], $current['start_time'], $current['end_time'], $bookingId)) {
+            setFlash('error', 'Cannot approve — this room now conflicts with another booking.');
+        } else {
+            $update = $pdo->prepare("UPDATE bookings SET status = :status, updated_at = NOW() WHERE id = :id");
+            $update->execute([':status' => $newStatus, ':id' => $bookingId]);
+            setFlash('success', "Booking {$newStatus}.");
         }
     }
 
@@ -135,10 +164,6 @@ $bookings = $stmt->fetchAll();
 
 $csrfToken = generateCsrfToken();
 
-// Editing is only allowed while a booking's date is MORE than 2 days
-// away - see edit_booking.php for the matching server-side check.
-$editCutoff = date('Y-m-d', strtotime('+2 days'));
-
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -178,6 +203,7 @@ $editCutoff = date('Y-m-d', strtotime('+2 days'));
         .badge-pending { background: #fff3cd; color: #856404; }
         .badge-approved { background: #d4edda; color: #155724; }
         .badge-rejected { background: #f8d7da; color: #721c24; }
+        .badge-cancelled { background: #e2e3e5; color: #383d41; }
         .badge-completed { background: #d1ecf1; color: #0c5460; }
 
         .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -186,6 +212,8 @@ $editCutoff = date('Y-m-d', strtotime('+2 days'));
             font-size: 10px; font-weight: 700; padding: 6px 10px; border: 1px solid #111;
             background: #fff; color: #111; cursor: pointer; text-decoration: none;
         }
+        .row-actions .btn-approve { border-color: #155724; color: #155724; }
+        .row-actions .btn-reject { border-color: #721c24; color: #721c24; }
         .row-actions .btn-cancel { border-color: #c9302c; color: #c9302c; }
         .row-actions .btn-none { border: none; color: #999; font-weight: 400; padding: 6px 0; }
 
@@ -297,15 +325,28 @@ $editCutoff = date('Y-m-d', strtotime('+2 days'));
                             <td>
                                 <div class="row-actions">
 
-                                    <?php $isEditable = $b['date'] > $editCutoff; ?>
+                                    <?php if ($b['status'] === 'Pending'): ?>
+
+                                        <form method="POST" action="bookings.php<?= $filterStatus !== '' ? '?status=' . urlencode($filterStatus) : '' ?>">
+                                            <input type="hidden" name="id" value="<?= (int) $b['id'] ?>">
+                                            <input type="hidden" name="action" value="approve">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                            <button type="submit" class="btn-approve">APPROVE</button>
+                                        </form>
+
+                                        <form method="POST" action="bookings.php<?= $filterStatus !== '' ? '?status=' . urlencode($filterStatus) : '' ?>"
+                                              onsubmit="return confirm('Reject this booking request?');">
+                                            <input type="hidden" name="id" value="<?= (int) $b['id'] ?>">
+                                            <input type="hidden" name="action" value="reject">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                            <button type="submit" class="btn-reject">REJECT</button>
+                                        </form>
+
+                                    <?php endif; ?>
 
                                     <?php if (in_array($b['status'], ['Pending', 'Approved'], true)): ?>
 
-                                        <?php if ($isEditable): ?>
-                                            <a href="edit_booking.php?id=<?= (int) $b['id'] ?>">EDIT</a>
-                                        <?php else: ?>
-                                            <span class="btn-none" title="Editing locks 2 days before the booking date">Locked</span>
-                                        <?php endif; ?>
+                                        <a href="edit_booking.php?id=<?= (int) $b['id'] ?>">EDIT</a>
 
                                         <form method="POST" action="bookings.php<?= $filterStatus !== '' ? '?status=' . urlencode($filterStatus) : '' ?>"
                                               onsubmit="return confirm('Cancel this booking?');">
@@ -315,7 +356,7 @@ $editCutoff = date('Y-m-d', strtotime('+2 days'));
                                             <button type="submit" class="btn-cancel">CANCEL</button>
                                         </form>
 
-                                    <?php else: ?>
+                                    <?php elseif ($b['status'] !== 'Pending'): ?>
                                         <span class="btn-none">None</span>
                                     <?php endif; ?>
 

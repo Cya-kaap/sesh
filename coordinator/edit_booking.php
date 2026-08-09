@@ -17,18 +17,15 @@
  *
  * Lock window:
  *   Editing is only allowed while the booking's date is MORE than 2
- *   days away. Inside that window there's no longer enough lead time
- *   for an Admin to review and approve before the exam/class happens,
- *   so editing is blocked here (and the EDIT link is hidden on
- *   bookings.php once a booking crosses into the window).
+ *   days away.
  *
  * Requires tables:
- *   - bookings, rooms, semesters
+ *   - bookings, rooms, semesters, programmes
  *
  * Access:
- *   Coordinator only, and only for a booking inside their own
- *   programme scope (never another programme's booking, regardless
- *   of what id is passed in the URL).
+ *   Coordinator only, scoped to their own programme via users.programme_id
+ *   (see database/migration_002_add_programme_fk.sql). Never another
+ *   programme's booking, regardless of what id is passed in the URL.
  */
 
 require_once __DIR__ . '/../config/db.php';
@@ -39,14 +36,18 @@ requireRole(['Coordinator']);
 
 $user = currentUser();
 
-$department = getCurrentDepartment($pdo, (int) $user['id']);
-
-$programmeStmt = $pdo->prepare("SELECT id, name FROM programmes WHERE name = :dept LIMIT 1");
-$programmeStmt->execute([':dept' => $department ?? '']);
+$programmeStmt = $pdo->prepare("
+    SELECT p.id, p.name
+    FROM users u
+    JOIN programmes p ON p.id = u.programme_id
+    WHERE u.id = :id
+    LIMIT 1
+");
+$programmeStmt->execute([':id' => $user['id']]);
 $programme = $programmeStmt->fetch();
 
 if (!$programme) {
-    setFlash('error', 'Your account department does not match any configured programme. Contact an Admin.');
+    setFlash('error', 'Your account is not assigned to a Programme. Contact an Admin.');
     header('Location: index.php');
     exit;
 }
@@ -80,10 +81,6 @@ if ($booking['date'] <= $editCutoff) {
     exit;
 }
 
-// The currently-booked room might not carry status 'Available' right now
-// (e.g. flagged for maintenance after this booking was made) — it's
-// included alongside the available list so the coordinator isn't forced
-// off their existing room just to open the edit form.
 $roomsStmt = $pdo->prepare("
     SELECT id, name, type, capacity FROM rooms
     WHERE status = 'Available' OR id = :current_room_id
@@ -153,6 +150,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        // Format validation runs before anything that assumes a
+        // well-formed date/time string (comparisons, conflict checks).
+        if ($values['date'] !== '' && !isValidDate($values['date'])) {
+            $errors[] = 'Invalid date format.';
+        }
+        if ($values['start_time'] !== '' && !isValidTime($values['start_time'])) {
+            $errors[] = 'Invalid start time format.';
+        }
+        if ($values['end_time'] !== '' && !isValidTime($values['end_time'])) {
+            $errors[] = 'Invalid end time format.';
+        }
+
         $selectedRoom = null;
 
         if (empty($errors)) {
@@ -172,17 +181,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = 'Please select a valid semester.';
             }
 
-            if ($values['date'] !== '' && $values['date'] < date('Y-m-d')) {
+            if ($values['date'] < date('Y-m-d')) {
                 $errors[] = 'Date cannot be in the past.';
             }
 
             // The new date must also sit outside the 2-day lock window —
             // a coordinator shouldn't be able to reschedule INTO it either.
-            if ($values['date'] !== '' && $values['date'] <= $editCutoff) {
+            if ($values['date'] <= $editCutoff) {
                 $errors[] = 'The new date must be more than 2 days from today.';
             }
 
-            if ($values['start_time'] !== '' && $values['end_time'] !== '' && $values['start_time'] >= $values['end_time']) {
+            if ($values['start_time'] >= $values['end_time']) {
                 $errors[] = 'End time must be after start time.';
             }
 
@@ -195,30 +204,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = "Number of students ({$values['num_students']}) exceeds the room's capacity ({$selectedRoom['capacity']}).";
         }
 
-        // Conflict check — same as book_exam.php, but excludes this
-        // booking's own row so it doesn't collide with itself.
-        if (empty($errors)) {
-
-            $conflictStmt = $pdo->prepare("
-                SELECT COUNT(*) FROM bookings
-                WHERE room_id = :room_id
-                  AND date = :date
-                  AND status IN ('Pending', 'Approved')
-                  AND id != :self_id
-                  AND start_time < :end_time
-                  AND end_time > :start_time
-            ");
-            $conflictStmt->execute([
-                ':room_id'    => $values['room_id'],
-                ':date'       => $values['date'],
-                ':self_id'    => $bookingId,
-                ':start_time' => $values['start_time'],
-                ':end_time'   => $values['end_time'],
-            ]);
-
-            if ((int) $conflictStmt->fetchColumn() > 0) {
-                $errors[] = 'This room is already booked during the selected time window. Choose a different room or time.';
-            }
+        // Conflict check — shared helper (includes/functions.php), excludes
+        // this booking's own row so it doesn't collide with itself.
+        if (empty($errors) && hasBookingConflict($pdo, (int) $values['room_id'], $values['date'], $values['start_time'], $values['end_time'], $bookingId)) {
+            $errors[] = 'This room is already booked during the selected time window. Choose a different room or time.';
         }
 
         // Save — always resets status to 'Pending' so it re-enters the
@@ -272,165 +261,126 @@ $csrfToken = generateCsrfToken();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit Booking | SESH Coordinator</title>
-    <link rel="stylesheet" href="../assets/css/style.css">
+    <title>Edit Booking #<?= htmlspecialchars((string)$bookingId) ?> - SESH</title>
     <style>
-        .coord-page { min-height: 100vh; background: #f4f3ef; color: #111; }
-        .coord-nav { min-height: 80px; padding: 0 6vw; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #d5d5d0; background: #f4f3ef; }
-        .coord-logo { font-size: 28px; font-weight: 900; letter-spacing: -0.08em; color: #111; text-decoration: none; }
-        .coord-nav-links a { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; color: #555; text-decoration: none; }
-
-        .coord-content { width: 88%; max-width: 800px; margin: 0 auto; padding: 60px 0; }
-        .page-label { margin-bottom: 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.2em; color: #777; }
-        .coord-content h1 { margin: 0 0 16px 0; font-size: clamp(32px, 5vw, 50px); letter-spacing: -0.05em; }
-
-        .approval-note { margin-bottom: 30px; padding: 16px 18px; background: #fff3cd; color: #856404; font-size: 13px; }
-
-        .form-errors { margin-bottom: 25px; padding: 16px 18px; background: #a33; color: #fff; font-size: 13px; }
-        .form-errors ul { margin: 0; padding-left: 18px; }
-
-        .exam-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
-        .exam-form .full { grid-column: 1 / -1; }
-
-        .exam-form label { display: block; margin-bottom: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; }
-        .exam-form input, .exam-form select {
-            width: 100%; padding: 13px; margin-bottom: 22px; border: 1px solid #ccc; background: #fff; font-size: 14px;
+        body { font-family: system-ui, -apple-system, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 650px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h1 { margin-top: 0; font-size: 1.5rem; color: #1e293b; }
+        .alert-danger { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 20px; }
+        .alert-danger ul { margin: 0; padding-left: 20px; }
+        .info-badge { background: #e0f2fe; color: #0369a1; padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; margin-bottom: 20px; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; }
+        input[type="text"], input[type="number"], input[type="date"], input[type="time"], select {
+            width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.95rem;
         }
-
-        .room-hint { margin-top: -14px; margin-bottom: 22px; font-size: 11px; color: #777; grid-column: 1 / -1; }
-
-        .form-actions { grid-column: 1 / -1; display: flex; gap: 12px; margin-top: 10px; }
-        .btn { display: inline-block; padding: 14px 22px; background: #111; color: #fff; text-decoration: none; font-size: 10px; font-weight: 800; letter-spacing: 0.14em; border: none; cursor: pointer; }
-        .btn:hover { background: #333; }
-        .btn-secondary { background: #ddd; color: #111; }
-        .btn-secondary:hover { background: #ccc; }
-
-        @media (max-width: 600px) {
-            .exam-form { grid-template-columns: 1fr; }
-        }
+        .form-row { display: flex; gap: 15px; }
+        .form-row .form-group { flex: 1; }
+        .actions { display: flex; gap: 10px; margin-top: 24px; }
+        .btn { padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; font-size: 0.95rem; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn-secondary { background: #e2e8f0; color: #475569; }
     </style>
 </head>
 <body>
-<div class="coord-page">
 
-    <header class="coord-nav">
-        <a href="index.php" class="coord-logo">SESH</a>
-        <nav class="coord-nav-links">
-            <a href="bookings.php">← BACK TO BOOKINGS</a>
-        </nav>
-    </header>
+<div class="container">
+    <h1>Edit Booking #<?= htmlspecialchars((string)$bookingId) ?> (<?= htmlspecialchars($booking['type']) ?>)</h1>
 
-    <main class="coord-content">
+    <div class="info-badge">
+        <strong>Programme:</strong> <?= htmlspecialchars($programme['name']) ?><br>
+        <em>Note: Saving edits will reset this booking's status to <strong>Pending</strong> for Admin re-approval.</em>
+    </div>
 
-        <p class="page-label"><?= htmlspecialchars($programme['name']) ?> PROGRAMME</p>
-        <h1>Edit Booking</h1>
+    <?php if (!empty($errors)): ?>
+        <div class="alert-danger">
+            <ul>
+                <?php foreach ($errors as $error): ?>
+                    <li><?= htmlspecialchars($error) ?></li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    <?php endif; ?>
 
-        <div class="approval-note">
-            Saving changes will resubmit this booking for Admin approval — its status will return to Pending until an Admin reviews the update.
+    <form method="POST" action="">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="room_id">Room *</label>
+                <select name="room_id" id="room_id" required>
+                    <option value="">-- Select Room --</option>
+                    <?php foreach ($rooms as $r): ?>
+                        <option value="<?= $r['id'] ?>" <?= $values['room_id'] == $r['id'] ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($r['name']) ?> (<?= htmlspecialchars($r['type']) ?>, Cap: <?= $r['capacity'] ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="semester_id">Semester *</label>
+                <select name="semester_id" id="semester_id" required>
+                    <option value="">-- Select Semester --</option>
+                    <?php foreach ($semesters as $s): ?>
+                        <option value="<?= $s['id'] ?>" <?= $values['semester_id'] == $s['id'] ? 'selected' : '' ?>>
+                            Semester <?= htmlspecialchars((string)$s['number']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
         </div>
 
-        <?php if (!empty($errors)): ?>
-            <div class="form-errors">
-                <ul>
-                    <?php foreach ($errors as $err): ?>
-                        <li><?= htmlspecialchars($err) ?></li>
-                    <?php endforeach; ?>
-                </ul>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="date">Date *</label>
+                <input type="date" name="date" id="date" value="<?= htmlspecialchars($values['date']) ?>" required>
+            </div>
+            <div class="form-group">
+                <label for="start_time">Start Time *</label>
+                <input type="time" name="start_time" id="start_time" value="<?= htmlspecialchars($values['start_time']) ?>" required>
+            </div>
+            <div class="form-group">
+                <label for="end_time">End Time *</label>
+                <input type="time" name="end_time" id="end_time" value="<?= htmlspecialchars($values['end_time']) ?>" required>
+            </div>
+        </div>
+
+        <?php if ($isExam): ?>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="exam_name">Exam Name *</label>
+                    <input type="text" name="exam_name" id="exam_name" value="<?= htmlspecialchars($values['exam_name']) ?>" required>
+                </div>
+                <div class="form-group">
+                    <label for="subject">Subject *</label>
+                    <input type="text" name="subject" id="subject" value="<?= htmlspecialchars($values['subject']) ?>" required>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="invigilator_name">Invigilator Name *</label>
+                    <input type="text" name="invigilator_name" id="invigilator_name" value="<?= htmlspecialchars($values['invigilator_name']) ?>" required>
+                </div>
+                <div class="form-group">
+                    <label for="num_students">Number of Students *</label>
+                    <input type="number" name="num_students" id="num_students" min="1" value="<?= htmlspecialchars($values['num_students']) ?>" required>
+                </div>
+            </div>
+        <?php else: ?>
+            <div class="form-group">
+                <label for="purpose">Purpose *</label>
+                <input type="text" name="purpose" id="purpose" value="<?= htmlspecialchars($values['purpose']) ?>" required>
             </div>
         <?php endif; ?>
 
-        <form method="POST" action="edit_booking.php?id=<?= (int) $bookingId ?>" class="exam-form">
-
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
-
-            <?php if ($isExam): ?>
-
-                <div class="full">
-                    <label for="exam_name">Exam Name</label>
-                    <input type="text" id="exam_name" name="exam_name" maxlength="150" required
-                           value="<?= htmlspecialchars($values['exam_name']) ?>">
-                </div>
-
-                <div class="full">
-                    <label for="subject">Subject</label>
-                    <input type="text" id="subject" name="subject" maxlength="100" required
-                           value="<?= htmlspecialchars($values['subject']) ?>">
-                </div>
-
-                <div>
-                    <label for="invigilator_name">Invigilator Name</label>
-                    <input type="text" id="invigilator_name" name="invigilator_name" maxlength="100" required
-                           value="<?= htmlspecialchars($values['invigilator_name']) ?>">
-                </div>
-
-                <div>
-                    <label for="num_students">Number of Students</label>
-                    <input type="number" id="num_students" name="num_students" min="1" required
-                           value="<?= htmlspecialchars($values['num_students']) ?>">
-                </div>
-
-            <?php else: ?>
-
-                <div class="full">
-                    <label for="purpose">Purpose</label>
-                    <input type="text" id="purpose" name="purpose" maxlength="150" required
-                           value="<?= htmlspecialchars($values['purpose']) ?>">
-                </div>
-
-            <?php endif; ?>
-
-            <div>
-                <label for="semester_id">Semester</label>
-                <select id="semester_id" name="semester_id" required>
-                    <?php foreach ($semesters as $s): ?>
-                        <option value="<?= (int) $s['id'] ?>" <?= (string) $s['id'] === $values['semester_id'] ? 'selected' : '' ?>>
-                            Semester <?= (int) $s['number'] ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-            <div>
-                <label for="room_id">Room</label>
-                <select id="room_id" name="room_id" required>
-                    <?php foreach ($rooms as $r): ?>
-                        <option value="<?= (int) $r['id'] ?>" <?= (string) $r['id'] === $values['room_id'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($r['name']) ?> — <?= htmlspecialchars($r['type']) ?> (cap. <?= (int) $r['capacity'] ?>)
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <p class="room-hint">Your current room is included even if it's no longer marked "Available".</p>
-
-            <div>
-                <label for="date">Date</label>
-                <input type="date" id="date" name="date" required min="<?= htmlspecialchars($editCutoff) ?>"
-                       value="<?= htmlspecialchars($values['date']) ?>">
-            </div>
-
-            <div></div>
-
-            <div>
-                <label for="start_time">Start Time</label>
-                <input type="time" id="start_time" name="start_time" required
-                       value="<?= htmlspecialchars($values['start_time']) ?>">
-            </div>
-
-            <div>
-                <label for="end_time">End Time</label>
-                <input type="time" id="end_time" name="end_time" required
-                       value="<?= htmlspecialchars($values['end_time']) ?>">
-            </div>
-
-            <div class="form-actions">
-                <button type="submit" class="btn">SAVE &amp; RESUBMIT</button>
-                <a href="bookings.php" class="btn btn-secondary">CANCEL</a>
-            </div>
-
-        </form>
-
-    </main>
-
+        <div class="actions">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+            <a href="bookings.php" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
 </div>
+
 </body>
 </html>

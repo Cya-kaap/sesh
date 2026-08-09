@@ -13,11 +13,8 @@
  *   Coordinator only.
  *
  * Scope note:
- *   A Coordinator's "managed programme" is derived by matching
- *   users.department to programmes.name (e.g. department "BCA" maps
- *   to the programme named "BCA"). There is no dedicated link table
- *   for this yet — flag if a Coordinator should manage more than one
- *   programme at once.
+ *   A Coordinator's "managed programme" is derived by joining
+ *   users.programme_id to programmes.id.
  */
 
 require_once __DIR__ . '/../config/db.php';
@@ -28,18 +25,23 @@ requireRole(['Coordinator']);
 
 $user = currentUser();
 
-// Pull department fresh from the DB on every load - see getCurrentDepartment()
-// in functions.php for why this can't come from the session.
-$department = getCurrentDepartment($pdo, (int) $user['id']);
-
-// Resolve the coordinator's programme scope from their department string.
-$programmeStmt = $pdo->prepare("SELECT id, name FROM programmes WHERE name = :dept LIMIT 1");
-$programmeStmt->execute([':dept' => $department ?? '']);
+// Resolve the coordinator's programme scope from their foreign key.
+// Fetched fresh from the database (not from session) so an Admin editing
+// this user's programme_id takes effect immediately, without requiring
+// the Coordinator to log out and back in.
+$programmeStmt = $pdo->prepare("
+    SELECT p.id, p.name
+    FROM users u
+    JOIN programmes p ON p.id = u.programme_id
+    WHERE u.id = :id
+    LIMIT 1
+");
+$programmeStmt->execute([':id' => $user['id']]);
 $programme = $programmeStmt->fetch();
 
 $scopeWarning = null;
 if (!$programme) {
-    $scopeWarning = 'Your account department ("' . htmlspecialchars($department ?? '') . '") does not match any configured programme. Contact an Admin to align your department with a programme name.';
+    $scopeWarning = 'Your account is not yet assigned to a Programme. Contact an Admin to assign one before you can manage departmental bookings.';
 }
 
 /*
@@ -78,13 +80,7 @@ if ($programme) {
     $upcomingClasses = (int) $classStmt->fetchColumn();
 }
 
-$availableRoomsList = $pdo->query("
-    SELECT id, name, type, capacity FROM rooms
-    WHERE status = 'Available'
-    ORDER BY name ASC
-")->fetchAll();
-
-$availableRooms = count($availableRoomsList);
+$availableRooms = (int) $pdo->query("SELECT COUNT(*) FROM rooms WHERE status = 'Available'")->fetchColumn();
 
 ?>
 <!DOCTYPE html>
@@ -125,14 +121,6 @@ $availableRooms = count($availableRoomsList);
         @media (max-width: 700px) {
             .module-grid { grid-template-columns: 1fr; }
         }
-
-        .rooms-section { margin-top: 60px; }
-        .rooms-section h2 { margin: 0 0 20px 0; font-size: 22px; letter-spacing: -0.03em; }
-        .rooms-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-        .room-card { padding: 20px; background: #fff; border: 1px solid #ddd; }
-        .room-card .room-name { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; }
-        .room-card .room-meta { margin-top: 8px; font-size: 11px; color: #777; }
-        .rooms-empty { padding: 20px; background: #fff; border: 1px solid #ddd; font-size: 13px; color: #777; }
     </style>
 </head>
 <body>
@@ -193,23 +181,6 @@ $availableRooms = count($availableRoomsList);
                 <p>View, edit or cancel bookings within your programme scope.</p>
             </a>
 
-        </section>
-
-        <section class="rooms-section">
-            <h2>Available Rooms</h2>
-
-            <?php if (empty($availableRoomsList)): ?>
-                <div class="rooms-empty">No rooms are currently marked "Available".</div>
-            <?php else: ?>
-                <div class="rooms-grid">
-                    <?php foreach ($availableRoomsList as $r): ?>
-                        <div class="room-card">
-                            <div class="room-name"><?= htmlspecialchars($r['name']) ?></div>
-                            <div class="room-meta"><?= htmlspecialchars($r['type']) ?> &middot; capacity <?= (int) $r['capacity'] ?></div>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
         </section>
 
     </main>
