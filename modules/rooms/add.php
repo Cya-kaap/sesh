@@ -1,133 +1,158 @@
 <?php
+
 /**
- * modules/rooms/add.php
- * Add a new room — Admin only.
+ * SESH - Add Room (modules pathway)
+ *
+ * Purpose:
+ *   Creates a new room record (name, capacity, status).
+ *
+ * Access (Corrected Unified Permission Matrix):
+ *   "Manage Rooms & Fixed Attributes (CRUD)":
+ *     Admin only has write access (Full Access). Coordinator, Faculty,
+ *     Maintenance are Read Only; Student is No Access. Since adding a
+ *     room is a write action, only Admin may reach this page.
+ *
+ * Security notes (this revision):
+ *   - Matrix-driven gate via requireWritePermission(), replacing a prior
+ *     requireRole(['Admin']) call that (per auth_check.php's own
+ *     docblock) ran before config/db.php was loaded. requireWritePermission()
+ *     has no $pdo dependency (see auth_check.php's file-level note), so
+ *     it is safe to call before config/db.php regardless — but this file
+ *     now loads config/db.php first anyway, for consistency with the
+ *     bookings files and because the INSERT below needs $pdo.
+ *   - CSRF token required on POST, matching every other mutating page in
+ *     modules/.
+ *   - Basic validation on capacity (positive integer) and status (must
+ *     be one of the schema's actual ENUM values, fetched via
+ *     getEnumValues() rather than hardcoded, so this file can't drift
+ *     from the schema the way modules/bookings/delete.php's status bug
+ *     did before the fix).
  */
-require_once __DIR__ . '/../../includes/auth_check.php';
-requireRole(['Admin']);
+
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../includes/auth_check.php';
+require_once __DIR__ . '/../../includes/functions.php';
+
+requireWritePermission(FEATURE_ROOMS_MANAGE);
 
 $errors = [];
 $form = [
-    'name'           => '',
-    'type'           => 'Classroom',
-    'capacity'       => '',
-    'has_projector'  => false,
-    'has_whiteboard' => false,
-    'has_ac'         => false,
-    'status'         => 'Available',
+    'name'     => '',
+    'capacity' => '',
+    'status'   => '',
 ];
 
-$validTypes   = ['Classroom', 'Laboratory', 'Seminar Hall', 'Conference Room', 'Other'];
-$validStatus  = ['Available', 'Under Maintenance', 'Unavailable'];
+$statusOptions = getEnumValues($pdo, 'rooms', 'status');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $form['name']           = trim($_POST['name'] ?? '');
-    $form['type']           = $_POST['type'] ?? '';
-    $form['capacity']       = $_POST['capacity'] ?? '';
-    $form['has_projector']  = isset($_POST['has_projector']);
-    $form['has_whiteboard'] = isset($_POST['has_whiteboard']);
-    $form['has_ac']         = isset($_POST['has_ac']);
-    $form['status']         = $_POST['status'] ?? '';
 
-    if ($form['name'] === '') {
-        $errors[] = 'Room name is required.';
-    }
-    if (!in_array($form['type'], $validTypes, true)) {
-        $errors[] = 'Invalid room type.';
-    }
-    if (!ctype_digit((string)$form['capacity']) || (int)$form['capacity'] <= 0) {
-        $errors[] = 'Capacity must be a whole number greater than 0.';
-    }
-    if (!in_array($form['status'], $validStatus, true)) {
-        $errors[] = 'Invalid status.';
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        setFlash('error', 'Your session expired. Please try again.');
+        header('Location: add.php');
+        exit;
     }
 
-    // Uniqueness check (schema also enforces this via UNIQUE constraint,
-    // but checking here first gives a friendlier error than a DB exception)
+    foreach ($form as $key => $_) {
+        $form[$key] = trim($_POST[$key] ?? '');
+    }
+
+    $name     = $form['name'];
+    $capacity = (int) $form['capacity'];
+    $status   = $form['status'];
+
+    if ($name === '') {
+        $errors[] = 'Please enter a room name.';
+    }
+
+    if ($capacity <= 0) {
+        $errors[] = 'Capacity must be a positive number.';
+    }
+
+    if ($status === '' || !in_array($status, $statusOptions, true)) {
+        $errors[] = 'Please select a valid status.';
+    }
+
+    // Uniqueness check, since bookings/edit.php and create.php both rely
+    // on room name being a meaningful label in <option> dropdowns.
     if (empty($errors)) {
-        $check = $pdo->prepare('SELECT id FROM rooms WHERE name = ?');
-        $check->execute([$form['name']]);
-        if ($check->fetch()) {
-            $errors[] = 'A room with that name already exists.';
+        $dupStmt = $pdo->prepare("SELECT COUNT(*) FROM rooms WHERE name = :name");
+        $dupStmt->execute([':name' => $name]);
+        if ((int) $dupStmt->fetchColumn() > 0) {
+            $errors[] = 'A room with this name already exists.';
         }
     }
 
     if (empty($errors)) {
-        $stmt = $pdo->prepare(
-            'INSERT INTO rooms (name, type, capacity, has_projector, has_whiteboard, has_ac, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
-        );
+        $stmt = $pdo->prepare("
+            INSERT INTO rooms (name, capacity, status)
+            VALUES (:name, :capacity, :status)
+        ");
         $stmt->execute([
-            $form['name'],
-            $form['type'],
-            (int)$form['capacity'],
-            $form['has_projector'] ? 1 : 0,
-            $form['has_whiteboard'] ? 1 : 0,
-            $form['has_ac'] ? 1 : 0,
-            $form['status'],
+            ':name'     => $name,
+            ':capacity' => $capacity,
+            ':status'   => $status,
         ]);
 
-        $_SESSION['flash'] = ['type' => 'success', 'message' => 'Room added successfully.'];
-        header('Location: /admin/rooms.php');
+        setFlash('success', 'Room added successfully.');
+        header('Location: list.php');
         exit;
     }
 }
+
+$csrfToken = generateCsrfToken();
+$flash     = getFlash();
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Add Room — SESH</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Room | SESH</title>
+    <link rel="stylesheet" href="../../assets/css/style.css">
 </head>
 <body>
-    <h1>Add New Room</h1>
+<div class="container">
 
-    <?php foreach ($errors as $err): ?>
-        <p class="form-error"><?= htmlspecialchars($err) ?></p>
+    <h1>Add Room</h1>
+
+    <p><a href="list.php">← Back to Rooms</a></p>
+
+    <?php foreach ($flash as $type => $msg): ?>
+        <div class="<?= $type === 'success' ? 'success-message' : 'form-error' ?>">
+            <?= htmlspecialchars($msg) ?>
+        </div>
+    <?php endforeach; ?>
+
+    <?php foreach ($errors as $error): ?>
+        <div class="form-error"><?= htmlspecialchars($error) ?></div>
     <?php endforeach; ?>
 
     <form method="POST" action="add.php">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+
         <label for="name">Room Name</label>
         <input type="text" id="name" name="name" required
                value="<?= htmlspecialchars($form['name']) ?>">
 
-        <label for="type">Type</label>
-        <select id="type" name="type">
-            <?php foreach ($validTypes as $t): ?>
-                <option value="<?= $t ?>" <?= $form['type'] === $t ? 'selected' : '' ?>><?= $t ?></option>
-            <?php endforeach; ?>
-        </select>
-
         <label for="capacity">Capacity</label>
         <input type="number" id="capacity" name="capacity" min="1" required
-               value="<?= htmlspecialchars((string)$form['capacity']) ?>">
-
-        <fieldset>
-            <legend>Resources</legend>
-            <label>
-                <input type="checkbox" name="has_projector" <?= $form['has_projector'] ? 'checked' : '' ?>>
-                Projector
-            </label>
-            <label>
-                <input type="checkbox" name="has_whiteboard" <?= $form['has_whiteboard'] ? 'checked' : '' ?>>
-                Whiteboard
-            </label>
-            <label>
-                <input type="checkbox" name="has_ac" <?= $form['has_ac'] ? 'checked' : '' ?>>
-                AC
-            </label>
-        </fieldset>
+               value="<?= htmlspecialchars($form['capacity']) ?>">
 
         <label for="status">Status</label>
-        <select id="status" name="status">
-            <?php foreach ($validStatus as $s): ?>
-                <option value="<?= $s ?>" <?= $form['status'] === $s ? 'selected' : '' ?>><?= $s ?></option>
+        <select id="status" name="status" required>
+            <option value="">-- Select Status --</option>
+            <?php foreach ($statusOptions as $opt): ?>
+                <option value="<?= htmlspecialchars($opt) ?>"
+                    <?= $form['status'] === $opt ? 'selected' : '' ?>>
+                    <?= htmlspecialchars($opt) ?>
+                </option>
             <?php endforeach; ?>
         </select>
 
-        <button type="submit">Save Room</button>
-        <a href="/admin/rooms.php">Cancel</a>
+        <button type="submit">Add Room</button>
     </form>
+
+</div>
 </body>
 </html>

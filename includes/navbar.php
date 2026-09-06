@@ -1,37 +1,17 @@
-<header class="header">
+<?php
+/**
+ * SESH – LEGACY navbar.php (DEPRECATED – DO NOT USE)
+ *
+ * This file belongs to an older, abandoned SRFMS codebase.
+ * It is kept only to avoid breaking any external references.
+ *
+ * DO NOT include this file. The live application uses the
+ * role-specific navigation inside admin/, coordinator/ and faculty/.
+ */
 
-    <div class="logo">
+declare(strict_types=1);
 
-        <a href="index.php">
-            <img src="assets/images/logo.png" alt="SESH Logo">
-        </a>
-
-    </div>
-
-    <nav class="navbar">
-
-        <ul>
-
-            <li><a href="index.php">Home</a></li>
-
-            <li><a href="#rooms">Rooms</a></li>
-
-            <li><a href="#booking">Booking</a></li>
-
-            <li><a href="#features">Features</a></li>
-
-            <li><a href="#about">About</a></li>
-
-            <li><a href="#contact">Contact</a></li>
-
-        </ul>
-
-    </nav>
-
-    <div class="nav-right">
-
-        <a href="login.php" class="login-btn">Login</a>
-
-    </div>
-
-</header>
+http_response_code(500);
+header('Content-Type: text/plain; charset=utf-8');
+echo "LEGACY navbar.php is deprecated and must not be included.\n";
+exit;

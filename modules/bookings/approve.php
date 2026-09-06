@@ -1,24 +1,98 @@
 <?php
 
-require_once __DIR__ . '/../../includes/auth_check.php';
+/**
+ * SESH - Review (Approve / Reject) Booking (modules pathway)
+ *
+ * Purpose:
+ *   Lets Admin or Coordinator approve or reject a Pending booking, after
+ *   re-checking for scheduling conflicts immediately before approval.
+ *
+ * Requires tables:
+ *   - bookings, rooms, users, programmes, semesters
+ *
+ * Access:
+ *   The Permission Matrix has no dedicated "Approve/Reject Booking" row.
+ *   The Permission Definitions describe "Full Access" as including
+ *   "approve" among create/read/update/delete/manage, so approval could be
+ *   read as already covered by Coordinator's Full Access on Book Regular
+ *   Classes / Book Examination Rooms. This file does NOT use that mapping,
+ *   for consistency with edit.php: approving, like editing, acts on a
+ *   booking that already exists rather than creating a new one, and the
+ *   Business Rules describe Coordinator's authority in general as
+ *   "Department-level scheduling and management authority." So this file
+ *   reuses FEATURE_BOOKINGS_CANCEL's tiers, exactly as edit.php does:
+ *     Admin       - Any Booking (System Override — bypasses scope checks)
+ *     Coordinator - Department Bookings (own programme_id only)
+ *     Faculty, Student, Maintenance - No Access (Faculty was never
+ *       permitted to approve/reject bookings, even under the original
+ *       requireRole(['Admin', 'Coordinator']) gate; ACCESS_ASSIGNED is
+ *       therefore deliberately excluded from the page-level gate below,
+ *       not just left unscoped, since Faculty holding write access to
+ *       Cancel Bookings for their own bookings does not imply they should
+ *       reach this page at all).
+ *
+ * Security notes (fixed in this revision):
+ *   - Previously had no CSRF protection at all. Now POST submissions
+ *     require a valid csrf_token, matching delete.php, list.php, and
+ *     edit.php.
+ *   - Previously let Coordinator approve/reject ANY booking system-wide
+ *     with no department scoping. Now scoped through authorizeScope(),
+ *     applied immediately after the booking is fetched — a Coordinator
+ *     outside a booking's department is redirected away before seeing
+ *     any of its details, not only blocked from acting on it.
+ *   - Previously compared $booking['status'] against the lowercase
+ *     literal 'pending' in PHP (a strict, case-sensitive comparison).
+ *     Since the schema's actual value is 'Pending', this comparison was
+ *     always true, meaning every submission always hit the "already
+ *     processed" branch and no booking could ever actually be approved
+ *     or rejected through this file. Fixed to 'Pending'.
+ *   - Previously wrote lowercase 'approved'/'rejected' into the status
+ *     column. Unlike delete.php's original 'cancelled' bug, these two
+ *     values do have case-variant matches in the schema's ENUM
+ *     ('Approved', 'Rejected'), so this most likely already stored
+ *     correctly under the schema's case-insensitive collation — but it
+ *     relied on that collation rather than being correct as written, so
+ *     it is corrected to the exact defined casing here regardless.
+ *   - Previously required a second, independent copy of
+ *     hasBookingConflict() from modules/bookings/conflict_check.php. This
+ *     file now requires includes/functions.php and uses that single
+ *     implementation instead — do not also require conflict_check.php
+ *     from this file; both define hasBookingConflict() and loading both
+ *     is a fatal "cannot redeclare function" error.
+ *   - Previously used die() for the booking-not-found case. This now
+ *     setFlash()s and redirects to list.php?all=1, which already renders
+ *     flashes.
+ */
+
 require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/conflict_check.php';
+require_once __DIR__ . '/../../includes/auth_check.php';
+require_once __DIR__ . '/../../includes/functions.php';
 
-requireRole(['Admin', 'Coordinator']);
+requireLogin();
 
-$id = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
+// Matrix-driven gate: admits exactly the roles whose Cancel Bookings tier
+// is Full Access or Department Bookings (Admin, Coordinator), and excludes
+// Assigned-scope roles (Faculty) as well as No Access roles (Student,
+// Maintenance) — identical admission to the original
+// requireRole(['Admin', 'Coordinator']), derived from the matrix instead
+// of a hardcoded role list.
+$approvalLevel = getPermissionLevel(FEATURE_BOOKINGS_CANCEL);
 
-if ($id <= 0) {
-    header('Location: list.php?all=1');
+if (!in_array($approvalLevel, [ACCESS_FULL, ACCESS_DEPARTMENT], true)) {
+    header('Location: ' . basePath('unauthorized.php'));
     exit;
 }
 
+$user = currentUser();
 
-/*
-|--------------------------------------------------------------------------
-| Get booking
-|--------------------------------------------------------------------------
-*/
+$isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
+$id     = $isPost ? (int) ($_POST['id'] ?? 0) : (int) ($_GET['id'] ?? 0);
+
+if ($id <= 0) {
+    setFlash('error', 'Invalid booking.');
+    header('Location: list.php?all=1');
+    exit;
+}
 
 $stmt = $pdo->prepare("
     SELECT
@@ -40,43 +114,70 @@ $stmt = $pdo->prepare("
 ");
 
 $stmt->execute([
-    ':id' => $id
+    ':id' => $id,
 ]);
 
 $booking = $stmt->fetch();
 
 if (!$booking) {
-    die('Booking not found.');
+    setFlash('error', 'Booking not found.');
+    header('Location: list.php?all=1');
+    exit;
+}
+
+// Department Scope Validation only matters for the Coordinator tier, so
+// the extra lookup is skipped for Admin. Fetched fresh from the database
+// rather than trusted from session — same reasoning already applied in
+// coordinator/index.php, delete.php, and edit.php.
+$actorProgrammeId = null;
+
+if ($user['role'] === ROLE_COORDINATOR) {
+    $programmeStmt = $pdo->prepare("SELECT programme_id FROM users WHERE id = :id");
+    $programmeStmt->execute([':id' => $user['id']]);
+    $programmeId = $programmeStmt->fetchColumn();
+    $actorProgrammeId = ($programmeId !== false && $programmeId !== null) ? (int) $programmeId : null;
+}
+
+$authorized = authorizeScope(
+    FEATURE_BOOKINGS_CANCEL,
+    [
+        'owner_id'     => (int) $booking['user_id'],
+        'programme_id' => (int) $booking['programme_id'],
+    ],
+    true,
+    $actorProgrammeId
+);
+
+if (!$authorized) {
+    setFlash('error', 'You are not authorized to review this booking.');
+    header('Location: list.php?all=1');
+    exit;
 }
 
 $message = '';
-$error = '';
+$error   = '';
 
+if ($isPost) {
 
-/*
-|--------------------------------------------------------------------------
-| Approve / Reject
-|--------------------------------------------------------------------------
-*/
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        setFlash('error', 'Your session expired. Please try again.');
+        header('Location: list.php?all=1');
+        exit;
+    }
 
     $action = $_POST['action'] ?? '';
 
-    if ($booking['status'] !== 'pending') {
+    if ($booking['status'] !== 'Pending') {
 
         $error = 'This booking has already been processed.';
 
     } elseif ($action === 'approve') {
 
-        /*
-        | Re-check conflict immediately before approval.
-        */
-
+        // Re-check conflict immediately before approval.
         if (
             hasBookingConflict(
                 $pdo,
-                (int)$booking['room_id'],
+                (int) $booking['room_id'],
                 $booking['date'],
                 $booking['start_time'],
                 $booking['end_time'],
@@ -84,49 +185,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             )
         ) {
 
-            $error =
-                'Cannot approve this booking because another booking conflicts with this time slot.';
+            $error = 'Cannot approve this booking because another booking conflicts with this time slot.';
 
         } else {
 
-            $stmt = $pdo->prepare("
+            $update = $pdo->prepare("
                 UPDATE bookings
-                SET status = 'approved'
+                SET status = 'Approved'
                 WHERE id = :id
-                  AND status = 'pending'
+                  AND status = 'Pending'
             ");
 
-            $stmt->execute([
-                ':id' => $id
+            $update->execute([
+                ':id' => $id,
             ]);
 
             $message = 'Booking approved successfully.';
 
-            $booking['status'] = 'approved';
+            $booking['status'] = 'Approved';
         }
 
     } elseif ($action === 'reject') {
 
-        $stmt = $pdo->prepare("
+        $update = $pdo->prepare("
             UPDATE bookings
-            SET status = 'rejected'
+            SET status = 'Rejected'
             WHERE id = :id
-              AND status = 'pending'
+              AND status = 'Pending'
         ");
 
-        $stmt->execute([
-            ':id' => $id
+        $update->execute([
+            ':id' => $id,
         ]);
 
         $message = 'Booking rejected successfully.';
 
-        $booking['status'] = 'rejected';
+        $booking['status'] = 'Rejected';
 
     } else {
 
         $error = 'Invalid action.';
     }
 }
+
+$csrfToken = generateCsrfToken();
 
 ?>
 
@@ -228,7 +330,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 
 
-    <?php if ($booking['status'] === 'pending'): ?>
+    <?php if ($booking['status'] === 'Pending'): ?>
 
         <form method="POST" action="approve.php">
 
@@ -236,6 +338,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 type="hidden"
                 name="id"
                 value="<?= $id ?>"
+            >
+
+            <input
+                type="hidden"
+                name="csrf_token"
+                value="<?= htmlspecialchars($csrfToken) ?>"
             >
 
             <button

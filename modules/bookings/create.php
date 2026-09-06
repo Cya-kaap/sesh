@@ -1,10 +1,12 @@
 <?php
 
-require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/conflict_check.php';
+require_once __DIR__ . '/../../includes/auth_check.php';
+require_once __DIR__ . '/../../includes/functions.php';
 
-requireRole(['Faculty', 'Coordinator', 'Admin']);
+requirePermission(FEATURE_BOOKINGS_CLASS_CREATE);
+
+$user = currentUser();
 
 $errors = [];
 
@@ -16,106 +18,52 @@ $form = [
     'start_time'   => '',
     'end_time'     => '',
     'type'         => '',
-    'purpose'      => ''
+    'purpose'      => '',
 ];
 
-/*
-|--------------------------------------------------------------------------
-| Load rooms
-|--------------------------------------------------------------------------
-*/
-
-$stmt = $pdo->query("
+$rooms = $pdo->query("
     SELECT id, name, capacity
     FROM rooms
     WHERE status = 'Available'
     ORDER BY name
-");
+")->fetchAll();
 
-$rooms = $stmt->fetchAll();
-
-
-/*
-|--------------------------------------------------------------------------
-| Load programmes
-|--------------------------------------------------------------------------
-*/
-
-$stmt = $pdo->query("
+$programmes = $pdo->query("
     SELECT id, name
     FROM programmes
     ORDER BY name
-");
+")->fetchAll();
 
-$programmes = $stmt->fetchAll();
-
-
-/*
-|--------------------------------------------------------------------------
-| Load semesters
-|--------------------------------------------------------------------------
-*/
-
-$stmt = $pdo->query("
+$semesters = $pdo->query("
     SELECT id, number
     FROM semesters
     ORDER BY number
-");
+")->fetchAll();
 
-$semesters = $stmt->fetchAll();
+$typeOptions = getEnumValues($pdo, 'bookings', 'type');
 
-
-/*
-|--------------------------------------------------------------------------
-| Load ENUM values for bookings.type
-|--------------------------------------------------------------------------
-| This avoids hard-coding values that may not match your database.
-|--------------------------------------------------------------------------
-*/
-
-$typeOptions = [];
-
-$stmt = $pdo->query("
-    SELECT COLUMN_TYPE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'bookings'
-      AND COLUMN_NAME = 'type'
-");
-
-$columnType = $stmt->fetchColumn();
-
-if ($columnType && preg_match("/^enum\\((.*)\\)$/", $columnType, $matches)) {
-    $typeOptions = str_getcsv($matches[1], ',', "'");
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Process form
-|--------------------------------------------------------------------------
-*/
+$csrfToken = generateCsrfToken();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        setFlash('error', 'Your session expired. Please try again.');
+        header('Location: create.php');
+        exit;
+    }
 
     foreach ($form as $key => $value) {
         $form[$key] = trim($_POST[$key] ?? '');
     }
 
-    $room_id      = (int)$form['room_id'];
-    $programme_id = (int)$form['programme_id'];
-    $semester_id  = (int)$form['semester_id'];
+    $room_id      = (int) $form['room_id'];
+    $programme_id = (int) $form['programme_id'];
+    $semester_id  = (int) $form['semester_id'];
     $date         = $form['date'];
     $start_time   = $form['start_time'];
     $end_time     = $form['end_time'];
     $type         = $form['type'];
     $purpose      = $form['purpose'];
-
-    /*
-    |----------------------------------------------------------------------
-    | Validation
-    |----------------------------------------------------------------------
-    */
 
     if ($room_id <= 0) {
         $errors[] = 'Please select a room.';
@@ -153,12 +101,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Please enter the purpose.';
     }
 
-    /*
-    |----------------------------------------------------------------------
-    | Check date
-    |----------------------------------------------------------------------
-    */
-
     if ($date !== '') {
 
         $dateObject = DateTime::createFromFormat('Y-m-d', $date);
@@ -168,37 +110,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    /*
-    |----------------------------------------------------------------------
-    | Check room conflict
-    |----------------------------------------------------------------------
-    */
-
     if (empty($errors)) {
-
-        if (
-            hasBookingConflict(
-                $pdo,
-                $room_id,
-                $date,
-                $start_time,
-                $end_time
-            )
-        ) {
-            $errors[] =
-                'This room is already booked or has a pending booking during the selected time.';
+        if (hasBookingConflict($pdo, $room_id, $date, $start_time, $end_time)) {
+            $errors[] = 'This room is already booked or has a pending booking during the selected time.';
         }
     }
 
-    /*
-    |----------------------------------------------------------------------
-    | Insert booking
-    |----------------------------------------------------------------------
-    */
-
     if (empty($errors)) {
 
-        $stmt = $pdo->prepare("
+        $insert = $pdo->prepare("
             INSERT INTO bookings
             (
                 room_id,
@@ -223,22 +143,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 :end_time,
                 :type,
                 :purpose,
-                'pending'
+                'Pending'
             )
         ");
 
-        $stmt->execute([
+        $insert->execute([
             ':room_id'      => $room_id,
-            ':user_id'      => $_SESSION['user_id'],
+            ':user_id'      => $user['id'],
             ':programme_id' => $programme_id,
             ':semester_id'  => $semester_id,
             ':date'         => $date,
             ':start_time'   => $start_time,
             ':end_time'     => $end_time,
             ':type'         => $type,
-            ':purpose'      => $purpose
+            ':purpose'      => $purpose,
         ]);
 
+        setFlash('success', 'Booking request submitted successfully.');
         header('Location: list.php?success=created');
         exit;
     }
@@ -281,6 +202,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
     <form method="POST" action="create.php">
+
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
 
         <label for="room_id">Room</label>
 

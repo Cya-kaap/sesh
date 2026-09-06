@@ -169,6 +169,7 @@ $csrfToken = generateCsrfToken();
 
         <p class="page-label">SESSION OVERRIDES</p>
         <h1>Booking Management</h1>
+        <a href="/sesh/modules/bookings/list.php">View All Rooms</a>
 
         <?php if (!empty($flash['success'])): ?>
             <div class="flash flash-success"><?= htmlspecialchars($flash['success']) ?></div>
