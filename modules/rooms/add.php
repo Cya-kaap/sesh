@@ -1,5 +1,10 @@
 <?php
 
+require_once __DIR__ . '/../../includes/auth_check.php';
+requireWritePermission(FEATURE_ROOMS_MANAGE);
+header('Location: ' . basePath('admin/rooms/create.php'));
+exit;
+
 /**
  * SESH - Add Room (modules pathway)
  *

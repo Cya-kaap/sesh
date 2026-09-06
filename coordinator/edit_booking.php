@@ -32,7 +32,8 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-requireRole(['Coordinator']);
+requireLogin();
+requirePermission(FEATURE_BOOKINGS_CANCEL);
 
 $user = currentUser();
 
@@ -66,6 +67,13 @@ if (!$booking) {
     exit;
 }
 
+$examDetailsStmt = $pdo->prepare('SELECT exam_name, subject, invigilator_name, num_students FROM exam_details WHERE booking_id = :booking_id');
+$examDetailsStmt->execute([':booking_id' => $bookingId]);
+$examDetails = $examDetailsStmt->fetch();
+if ($examDetails) {
+    $booking = array_merge($booking, $examDetails);
+}
+
 if (!in_array($booking['status'], ['Pending', 'Approved'], true)) {
     setFlash('error', 'Only pending or approved bookings can be edited.');
     header('Location: bookings.php');
@@ -83,7 +91,7 @@ if ($booking['date'] <= $editCutoff) {
 
 $roomsStmt = $pdo->prepare("
     SELECT id, name, type, capacity FROM rooms
-    WHERE status = 'Available' OR id = :current_room_id
+    WHERE status = 'Active' OR id = :current_room_id
     ORDER BY name ASC
 ");
 $roomsStmt->execute([':current_room_id' => $booking['room_id']]);
@@ -215,6 +223,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Approved state with new, unreviewed details.
         if (empty($errors)) {
 
+            $pdo->beginTransaction();
+
             $update = $pdo->prepare("
                 UPDATE bookings SET
                     room_id = :room_id,
@@ -245,6 +255,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':num_students'     => $isExam ? (int) $values['num_students'] : null,
                 ':id'               => $bookingId,
             ]);
+
+            if ($isExam) {
+                $examUpdate = $pdo->prepare("INSERT INTO exam_details (booking_id, exam_name, subject, invigilator_name, num_students) VALUES (:booking_id, :exam_name, :subject, :invigilator_name, :num_students) ON DUPLICATE KEY UPDATE exam_name = VALUES(exam_name), subject = VALUES(subject), invigilator_name = VALUES(invigilator_name), num_students = VALUES(num_students)");
+                $examUpdate->execute([
+                    ':booking_id' => $bookingId,
+                    ':exam_name' => $values['exam_name'],
+                    ':subject' => $values['subject'],
+                    ':invigilator_name' => $values['invigilator_name'],
+                    ':num_students' => (int) $values['num_students'],
+                ]);
+            } else {
+                $pdo->prepare('DELETE FROM exam_details WHERE booking_id = :booking_id')->execute([':booking_id' => $bookingId]);
+            }
+
+            $pdo->commit();
 
             setFlash('success', 'Booking updated and re-submitted for Admin approval.');
             header('Location: bookings.php');

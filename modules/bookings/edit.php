@@ -102,6 +102,13 @@ if (!$booking) {
     exit;
 }
 
+$examDetailsStmt = $pdo->prepare('SELECT exam_name, subject, invigilator_name, num_students FROM exam_details WHERE booking_id = :booking_id');
+$examDetailsStmt->execute([':booking_id' => $id]);
+$examDetails = $examDetailsStmt->fetch();
+if ($examDetails) {
+    $booking = array_merge($booking, $examDetails);
+}
+
 // Department Scope Validation only matters for the Coordinator tier, so
 // the extra lookup is skipped for everyone else. Fetched fresh from the
 // database rather than trusted from session — same reasoning already
@@ -140,7 +147,7 @@ if ($booking['status'] !== 'Pending') {
 $rooms = $pdo->query("
     SELECT id, name, capacity
     FROM rooms
-    WHERE status = 'Available'
+    WHERE status = 'Active'
     ORDER BY name
 ")->fetchAll();
 
@@ -222,6 +229,8 @@ if ($isPost) {
 
     if (empty($errors)) {
 
+        $pdo->beginTransaction();
+
         $update = $pdo->prepare("
             UPDATE bookings
             SET
@@ -247,6 +256,21 @@ if ($isPost) {
             ':purpose'      => $purpose,
             ':id'           => $id,
         ]);
+
+        if ($type === 'Exam' && !empty($_POST['exam_name']) && !empty($_POST['subject']) && !empty($_POST['invigilator_name']) && (int) ($_POST['num_students'] ?? 0) > 0) {
+            $examUpdate = $pdo->prepare("INSERT INTO exam_details (booking_id, exam_name, subject, invigilator_name, num_students) VALUES (:booking_id, :exam_name, :subject, :invigilator_name, :num_students) ON DUPLICATE KEY UPDATE exam_name = VALUES(exam_name), subject = VALUES(subject), invigilator_name = VALUES(invigilator_name), num_students = VALUES(num_students)");
+            $examUpdate->execute([
+                ':booking_id' => $id,
+            ':exam_name' => trim($_POST['exam_name']),
+            ':subject' => trim($_POST['subject']),
+            ':invigilator_name' => trim($_POST['invigilator_name']),
+            ':num_students' => (int) $_POST['num_students'],
+            ]);
+        } elseif ($type === 'Class') {
+            $pdo->prepare('DELETE FROM exam_details WHERE booking_id = :booking_id')->execute([':booking_id' => $id]);
+        }
+
+        $pdo->commit();
 
         setFlash('success', 'Booking updated successfully.');
         header('Location: list.php');

@@ -21,7 +21,8 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-requireRole(['Coordinator']);
+requireLogin();
+requirePermission(FEATURE_BOOKINGS_CANCEL);
 
 $user = currentUser();
 
@@ -80,7 +81,7 @@ if ($programme) {
     $upcomingClasses = (int) $classStmt->fetchColumn();
 }
 
-$availableRooms = (int) $pdo->query("SELECT COUNT(*) FROM rooms WHERE status = 'Available'")->fetchColumn();
+$availableRooms = (int) $pdo->query("SELECT COUNT(*) FROM rooms WHERE status = 'Active'")->fetchColumn();
 
 ?>
 <!DOCTYPE html>
@@ -169,6 +170,12 @@ $availableRooms = (int) $pdo->query("SELECT COUNT(*) FROM rooms WHERE status = '
 
         <section class="module-grid">
 
+            <a href="book_room.php" class="module-card">
+                <small>00 / ROOM BOOKING</small>
+                <h3>Book a Room</h3>
+                <p>Find an available room by time, capacity, amenities and accessibility.</p>
+            </a>
+
             <a href="book_exam.php" class="module-card">
                 <small>01 / EXAM BOOKING</small>
                 <h3>Book an Examination</h3>
@@ -179,6 +186,24 @@ $availableRooms = (int) $pdo->query("SELECT COUNT(*) FROM rooms WHERE status = '
                 <small>02 / SCHEDULE</small>
                 <h3>Department Bookings</h3>
                 <p>View, edit or cancel bookings within your programme scope.</p>
+            </a>
+
+            <a href="../modules/timetable/index.php" class="module-card">
+                <small>03 / TIMETABLE</small>
+                <h3>Weekly Timetable</h3>
+                <p>Review approved classes and examinations across the weekly schedule.</p>
+            </a>
+
+            <a href="../admin/reports.php" class="module-card">
+                <small>04 / FEEDBACK</small>
+                <h3>Room Feedback Report</h3>
+                <p>Review room ratings and reported issues across a selected date range.</p>
+            </a>
+
+            <a href="../modules/rooms/list.php" class="module-card">
+                <small>05 / ROOMS</small>
+                <h3>Room Directory</h3>
+                <p>View room capacity, resources, amenities, accessibility, photos and floor plans.</p>
             </a>
 
         </section>

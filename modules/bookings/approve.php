@@ -69,7 +69,7 @@ require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../includes/functions.php';
 
 requireLogin();
-
+requirePermission(FEATURE_BOOKINGS_CANCEL);
 // Matrix-driven gate: admits exactly the roles whose Cancel Bookings tier
 // is Full Access or Department Bookings (Admin, Coordinator), and excludes
 // Assigned-scope roles (Faculty) as well as No Access roles (Student,
@@ -173,17 +173,23 @@ if ($isPost) {
 
     } elseif ($action === 'approve') {
 
+        $pdo->exec('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+        $pdo->beginTransaction();
+
         // Re-check conflict immediately before approval.
         if (
-            hasBookingConflict(
+            findBookingConflict(
                 $pdo,
                 (int) $booking['room_id'],
                 $booking['date'],
                 $booking['start_time'],
                 $booking['end_time'],
-                $booking['id']
+                $booking['id'],
+                true
             )
         ) {
+
+            $pdo->rollBack();
 
             $error = 'Cannot approve this booking because another booking conflicts with this time slot.';
 
@@ -199,6 +205,8 @@ if ($isPost) {
             $update->execute([
                 ':id' => $id,
             ]);
+
+            $pdo->commit();
 
             $message = 'Booking approved successfully.';
 

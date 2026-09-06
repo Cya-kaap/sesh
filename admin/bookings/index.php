@@ -1,5 +1,12 @@
 <?php
 
+require_once __DIR__ . '/../../includes/auth_check.php';
+
+requirePermission(FEATURE_BOOKINGS_CANCEL);
+
+header('Location: ' . basePath('admin/bookings/manage.php'));
+exit;
+
 /**
  * SESH - Admin: Booking Overrides & Management
  *
@@ -20,7 +27,8 @@ require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../includes/functions.php';
 
-requireRole(['Admin']);
+requireLogin();
+requirePermission(FEATURE_BOOKINGS_CANCEL);
 
 $user  = currentUser();
 $flash = getFlash();
@@ -60,19 +68,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'], $_POST['id'
 
             $newStatus = $actionMap[$action];
 
-            $check = $pdo->prepare("SELECT status FROM bookings WHERE id = :id");
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+            $pdo->beginTransaction();
+
+            $check = $pdo->prepare("SELECT status, room_id, date, start_time, end_time FROM bookings WHERE id = :id FOR UPDATE");
             $check->execute([':id' => $bookingId]);
-            $current = $check->fetchColumn();
+            $booking = $check->fetch();
+            $current = $booking['status'] ?? false;
 
             if ($current === false) {
+                $pdo->rollBack();
                 setFlash('error', 'Booking not found.');
             } elseif ($current !== 'Pending') {
+                $pdo->rollBack();
                 setFlash('error', 'Only pending bookings can be approved or rejected.');
+            } elseif ($newStatus === 'Approved' && findBookingConflict($pdo, (int) $booking['room_id'], $booking['date'], $booking['start_time'], $booking['end_time'], $bookingId, true)) {
+                $pdo->rollBack();
+                setFlash('error', 'Cannot approve this booking because the room overlaps an existing approved booking.');
             } else {
                 $update = $pdo->prepare("
                     UPDATE bookings SET status = :status, updated_at = NOW() WHERE id = :id
                 ");
                 $update->execute([':status' => $newStatus, ':id' => $bookingId]);
+                $pdo->commit();
                 setFlash('success', "Booking {$newStatus} successfully.");
             }
         }

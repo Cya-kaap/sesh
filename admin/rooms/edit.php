@@ -16,8 +16,10 @@
 require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../includes/functions.php';
+require_once __DIR__ . '/../../includes/room_helpers.php';
 
-requireRole(['Admin']);
+requireLogin();
+requireWritePermission(FEATURE_ROOMS_MANAGE);
 
 $user = currentUser();
 
@@ -39,15 +41,24 @@ if (!$room) {
     exit;
 }
 
-$typeOptions   = getEnumValues($pdo, 'rooms', 'type');
-$statusOptions = getEnumValues($pdo, 'rooms', 'status');
+$typeOptions = ROOM_TYPES;
+$statusOptions = ROOM_STATUSES;
 
 $errors = [];
 
 $values = [
+    'room_code'      => $room['room_code'],
     'name'           => $room['name'],
+    'building'       => $room['building'],
+    'floor'          => $room['floor'],
+    'wing_block'     => $room['wing_block'],
+    'notes'          => $room['notes'],
     'type'           => $room['type'],
     'capacity'       => $room['capacity'],
+    'exam_capacity'  => $room['exam_capacity'],
+    'primary_department' => $room['primary_department'],
+    'amenities'      => roomDecodeValues($room['amenities']),
+    'accessibility'  => roomDecodeValues($room['accessibility']),
     'has_projector'  => (bool) $room['has_projector'],
     'has_whiteboard' => (bool) $room['has_whiteboard'],
     'has_ac'         => (bool) $room['has_ac'],
@@ -69,8 +80,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
 
         $values['name']           = trim($_POST['name'] ?? '');
+        $values['building']       = trim($_POST['building'] ?? '');
+        $values['floor']          = trim($_POST['floor'] ?? '');
+        $values['wing_block']     = trim($_POST['wing_block'] ?? '');
+        $values['notes']          = trim($_POST['notes'] ?? '');
+        $values['room_code']      = strtoupper(trim($_POST['room_code'] ?? ''));
         $values['type']           = $_POST['type'] ?? '';
         $values['capacity']       = trim($_POST['capacity'] ?? '');
+        $values['exam_capacity']  = trim($_POST['exam_capacity'] ?? '');
+        $values['primary_department'] = trim($_POST['primary_department'] ?? 'Common / Shared');
+        $values['amenities']      = array_values(array_intersect((array) ($_POST['amenities'] ?? []), ROOM_AMENITIES));
+        $values['accessibility']  = array_values(array_intersect((array) ($_POST['accessibility'] ?? []), ROOM_ACCESSIBILITY));
         $values['has_projector']  = isset($_POST['has_projector']);
         $values['has_whiteboard'] = isset($_POST['has_whiteboard']);
         $values['has_ac']         = isset($_POST['has_ac']);
@@ -78,10 +98,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Validation
 
-        if ($values['name'] === '') {
-            $errors[] = 'Room name is required.';
-        } elseif (mb_strlen($values['name']) > 100) {
+        if ($values['room_code'] === '' || !preg_match('/^[A-Z0-9][A-Z0-9._-]{0,29}$/', $values['room_code'])) {
+            $errors[] = 'Room number/code is required and may contain only letters, numbers, dot, underscore, or hyphen.';
+        }
+        if (mb_strlen($values['name']) > 100) {
             $errors[] = 'Room name must be 100 characters or fewer.';
+        }
+
+        if ($values['exam_capacity'] !== '' && (!ctype_digit((string) $values['exam_capacity']) || (int) $values['exam_capacity'] < 1 || (int) $values['exam_capacity'] > (int) $values['capacity'])) {
+            $errors[] = 'Examination capacity must be a positive number no greater than seating capacity.';
+        }
+        if ($values['primary_department'] === '' || mb_strlen($values['primary_department']) > 100) {
+            $errors[] = 'Primary department is required and must be 100 characters or fewer.';
         }
 
         if (!in_array($values['type'], $typeOptions, true)) {
@@ -100,22 +128,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Duplicate name check (excluding this room)
         if (empty($errors)) {
-            $dupCheck = $pdo->prepare("SELECT id FROM rooms WHERE name = :name AND id != :id LIMIT 1");
-            $dupCheck->execute([':name' => $values['name'], ':id' => $roomId]);
+            $dupCheck = $pdo->prepare("SELECT id FROM rooms WHERE room_code = :room_code AND id != :id LIMIT 1");
+            $dupCheck->execute([':room_code' => $values['room_code'], ':id' => $roomId]);
 
             if ($dupCheck->fetch()) {
-                $errors[] = 'A room with this name already exists.';
+                $errors[] = 'A room with this code already exists.';
             }
         }
 
         // Update
         if (empty($errors)) {
 
+            try {
+            $photos = roomUploadImages($_FILES['photos'] ?? [], $values['room_code'], 4, 'photos');
+            $floorPlan = roomUploadImage($_FILES['floor_plan'] ?? null, $values['room_code'], 'floor-plans');
             $update = $pdo->prepare("
                 UPDATE rooms
-                SET name = :name,
+                SET room_code = :room_code,
+                    name = :name,
+                    building = :building,
+                    floor = :floor,
+                    wing_block = :wing_block,
+                    notes = :notes,
                     type = :type,
                     capacity = :capacity,
+                    exam_capacity = :exam_capacity,
+                    primary_department = :primary_department,
+                    amenities = :amenities,
+                    accessibility = :accessibility,
                     has_projector = :has_projector,
                     has_whiteboard = :has_whiteboard,
                     has_ac = :has_ac,
@@ -124,19 +164,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ");
 
             $update->execute([
+                ':room_code'      => $values['room_code'],
                 ':name'           => $values['name'],
+                ':building'       => $values['building'] !== '' ? $values['building'] : null,
+                ':floor'          => $values['floor'] !== '' ? $values['floor'] : null,
+                ':wing_block'     => $values['wing_block'] !== '' ? $values['wing_block'] : null,
+                ':notes'          => $values['notes'] !== '' ? $values['notes'] : null,
                 ':type'           => $values['type'],
                 ':capacity'       => (int) $values['capacity'],
+                ':exam_capacity'  => $values['exam_capacity'] !== '' ? (int) $values['exam_capacity'] : null,
+                ':primary_department' => $values['primary_department'],
+                ':amenities'      => roomJsonValues($values['amenities'], ROOM_AMENITIES),
+                ':accessibility'  => roomJsonValues($values['accessibility'], ROOM_ACCESSIBILITY),
                 ':has_projector'  => $values['has_projector'] ? 1 : 0,
                 ':has_whiteboard' => $values['has_whiteboard'] ? 1 : 0,
                 ':has_ac'         => $values['has_ac'] ? 1 : 0,
                 ':status'         => $values['status'],
                 ':id'             => $roomId,
             ]);
+            $media = $pdo->prepare('INSERT INTO room_media (room_id, media_type, file_path) VALUES (:room_id, :media_type, :file_path)');
+            foreach ($photos as $path) $media->execute([':room_id' => $roomId, ':media_type' => 'photo', ':file_path' => $path]);
+            if ($floorPlan) $media->execute([':room_id' => $roomId, ':media_type' => 'floor_plan', ':file_path' => $floorPlan]);
+            } catch (Throwable $e) {
+                $errors[] = $e->getMessage();
+            }
 
-            setFlash('success', 'Room "' . $values['name'] . '" was updated successfully.');
-            header('Location: index.php');
-            exit;
+            if (empty($errors)) {
+                setFlash('success', 'Room "' . $values['room_code'] . '" was updated successfully.');
+                header('Location: index.php');
+                exit;
+            }
         }
     }
 }
@@ -322,14 +379,27 @@ $csrfToken = generateCsrfToken();
             </div>
         <?php endif; ?>
 
-        <form method="POST" action="edit.php?id=<?= $roomId ?>" class="room-form">
+        <form method="POST" action="edit.php?id=<?= $roomId ?>" class="room-form" enctype="multipart/form-data" id="room-form">
 
             <input type="hidden" name="id" value="<?= $roomId ?>">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
 
-            <label for="name">Room Name / Number</label>
-            <input type="text" id="name" name="name" required maxlength="100"
+                 <label for="room_code">Room Number / Code</label>
+                 <input type="text" id="room_code" name="room_code" required maxlength="30" pattern="[A-Za-z0-9._-]+"
+                     value="<?= htmlspecialchars($values['room_code']) ?>">
+
+                 <label for="name">Display Name <span style="font-weight:400;">(optional)</span></label>
+                 <input type="text" id="name" name="name" maxlength="100"
                    value="<?= htmlspecialchars($values['name']) ?>">
+
+                     <label for="building">Building <span style="font-weight:400;">(optional)</span></label>
+                     <input type="text" id="building" name="building" maxlength="100" value="<?= htmlspecialchars($values['building']) ?>">
+
+                     <label for="floor">Floor <span style="font-weight:400;">(optional)</span></label>
+                     <input type="text" id="floor" name="floor" maxlength="50" value="<?= htmlspecialchars($values['floor']) ?>">
+
+                    <label for="wing_block">Wing / Block <span style="font-weight:400;">(optional)</span></label>
+                    <input type="text" id="wing_block" name="wing_block" maxlength="100" value="<?= htmlspecialchars($values['wing_block']) ?>">
 
             <label for="type">Type</label>
             <select id="type" name="type" required>
@@ -343,6 +413,14 @@ $csrfToken = generateCsrfToken();
             <label for="capacity">Capacity</label>
             <input type="number" id="capacity" name="capacity" required min="1" max="65535"
                    value="<?= htmlspecialchars((string) $values['capacity']) ?>">
+
+                 <label for="exam_capacity">Examination Capacity <span style="font-weight:400;">(optional)</span></label>
+                 <input type="number" id="exam_capacity" name="exam_capacity" min="1" max="65535"
+                     value="<?= htmlspecialchars((string) $values['exam_capacity']) ?>">
+
+                 <label for="primary_department">Primary Department / Ownership</label>
+                 <input type="text" id="primary_department" name="primary_department" required maxlength="100"
+                     value="<?= htmlspecialchars($values['primary_department']) ?>">
 
             <label>Resources</label>
             <div class="checkbox-row">
@@ -360,6 +438,29 @@ $csrfToken = generateCsrfToken();
                 </label>
             </div>
 
+            <label>Amenities</label>
+            <div class="checkbox-row">
+                <?php foreach (ROOM_AMENITIES as $amenity): ?>
+                    <label><input type="checkbox" name="amenities[]" value="<?= htmlspecialchars($amenity) ?>" <?= in_array($amenity, $values['amenities'], true) ? 'checked' : '' ?>> <?= htmlspecialchars($amenity) ?></label>
+                <?php endforeach; ?>
+            </div>
+
+            <label>Accessibility</label>
+            <div class="checkbox-row">
+                <?php foreach (ROOM_ACCESSIBILITY as $item): ?>
+                    <label><input type="checkbox" name="accessibility[]" value="<?= htmlspecialchars($item) ?>" <?= in_array($item, $values['accessibility'], true) ? 'checked' : '' ?>> <?= htmlspecialchars($item) ?></label>
+                <?php endforeach; ?>
+            </div>
+
+            <label for="photos">Add Room Photos <span style="font-weight:400;">(up to 4, JPG/PNG/WebP, 5 MB each)</span></label>
+            <input type="file" id="photos" name="photos[]" accept="image/jpeg,image/png,image/webp" multiple>
+
+            <label for="floor_plan">Add Floor Plan <span style="font-weight:400;">(optional image)</span></label>
+            <input type="file" id="floor_plan" name="floor_plan" accept="image/jpeg,image/png,image/webp">
+
+            <label for="notes">Notes <span style="font-weight:400;">(optional)</span></label>
+            <textarea id="notes" name="notes" maxlength="2000"><?= htmlspecialchars($values['notes']) ?></textarea>
+
             <label for="status">Status</label>
             <select id="status" name="status" required>
                 <?php foreach ($statusOptions as $opt): ?>
@@ -375,6 +476,21 @@ $csrfToken = generateCsrfToken();
             </div>
 
         </form>
+
+        <script>
+            document.getElementById('room-form').addEventListener('submit', function (event) {
+                const capacity = Number(document.getElementById('capacity').value);
+                const examCapacity = Number(document.getElementById('exam_capacity').value);
+                if (examCapacity && examCapacity > capacity) {
+                    event.preventDefault();
+                    alert('Examination capacity cannot exceed seating capacity.');
+                }
+                if (document.getElementById('photos').files.length > 4) {
+                    event.preventDefault();
+                    alert('You may upload at most 4 room photos.');
+                }
+            });
+        </script>
 
     </main>
 

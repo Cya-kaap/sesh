@@ -1,5 +1,11 @@
 <?php
 
+require_once __DIR__ . '/../../includes/auth_check.php';
+requireWritePermission(FEATURE_ROOMS_MANAGE);
+$roomId = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
+header('Location: ' . basePath('admin/rooms/edit.php?id=' . $roomId));
+exit;
+
 /**
  * SESH - Edit Room (modules pathway)
  *

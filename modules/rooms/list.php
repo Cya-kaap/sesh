@@ -38,7 +38,7 @@ $canWriteRooms = canWrite(FEATURE_ROOMS_MANAGE);
 $canWriteStatus = canWrite(FEATURE_ROOMS_STATUS);
 
 $rooms = $pdo->query("
-    SELECT id, name, capacity, status
+    SELECT id, room_code, name, type, capacity, exam_capacity, primary_department, amenities, accessibility, status
     FROM rooms
     ORDER BY name
 ")->fetchAll();
@@ -100,7 +100,8 @@ $csrfToken = generateCsrfToken();
                 <thead>
                     <tr>
                         <th>ID</th>
-                        <th>Name</th>
+                        <th>Code / Name</th>
+                        <th>Type</th>
                         <th>Capacity</th>
                         <th>Status</th>
                         <?php if ($canWriteRooms || $canWriteStatus): ?>
@@ -112,8 +113,9 @@ $csrfToken = generateCsrfToken();
                     <?php foreach ($rooms as $room): ?>
                         <tr>
                             <td><?= (int) $room['id'] ?></td>
-                            <td><?= htmlspecialchars($room['name']) ?></td>
-                            <td><?= (int) $room['capacity'] ?></td>
+                            <td><a href="view.php?id=<?= (int) $room['id'] ?>"><?= htmlspecialchars($room['room_code']) ?></a><br><small><?= htmlspecialchars($room['name'] ?: '') ?></small></td>
+                            <td><?= htmlspecialchars($room['type']) ?></td>
+                            <td><?= (int) $room['capacity'] ?><?php if ($room['exam_capacity'] !== null): ?><br><small>Exam: <?= (int) $room['exam_capacity'] ?></small><?php endif; ?></td>
                             <td><?= htmlspecialchars($room['status']) ?></td>
 
                             <?php if ($canWriteRooms || $canWriteStatus): ?>

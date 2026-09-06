@@ -52,14 +52,14 @@ ON DUPLICATE KEY UPDATE full_name = full_name;
 -- so this uses WHERE NOT EXISTS rather than ON DUPLICATE KEY UPDATE
 -- to stay idempotent.
 -- -----------------------------------------------------
-INSERT INTO rooms (name, type, capacity, has_projector, has_whiteboard, has_ac, status)
+INSERT INTO rooms (room_code, name, type, capacity, exam_capacity, primary_department, amenities, accessibility, has_projector, has_whiteboard, has_ac, status)
 SELECT * FROM (SELECT
-    'Lab-101' AS name, 'Laboratory' AS type, 40 AS capacity, 1 AS has_projector, 1 AS has_whiteboard, 1 AS has_ac, 'Available' AS status
-    UNION ALL SELECT 'Lab-102',       'Laboratory',      35, 1, 1, 0, 'Available'
-    UNION ALL SELECT 'Seminar Hall',  'Seminar Hall',    120, 1, 0, 1, 'Available'
-    UNION ALL SELECT 'Classroom-201', 'Classroom',       60, 0, 1, 1, 'Available'
-    UNION ALL SELECT 'Exam Hall 1',   'Conference Room', 80, 0, 1, 0, 'Available'
+    'Lab-101' AS room_code, 'Lab-101' AS name, 'Computer Lab' AS type, 40 AS capacity, 40 AS exam_capacity, 'BCA' AS primary_department, '["Projector","Whiteboard","AC","Computers"]' AS amenities, '[]' AS accessibility, 1 AS has_projector, 1 AS has_whiteboard, 1 AS has_ac, 'Active' AS status
+    UNION ALL SELECT 'Lab-102', 'Lab-102', 'Computer Lab', 35, 35, 'BCA', '["Projector","Whiteboard","Computers"]', '[]', 1, 1, 0, 'Active'
+    UNION ALL SELECT 'Seminar-Hall', 'Seminar Hall', 'Seminar Hall', 120, 120, 'Common / Shared', '["Projector","Sound System"]', '[]', 1, 0, 1, 'Active'
+    UNION ALL SELECT 'Classroom-201', 'Classroom 201', 'Classroom', 60, 60, 'Common / Shared', '["Whiteboard","AC"]', '[]', 0, 1, 1, 'Active'
+    UNION ALL SELECT 'Exam-Hall-1', 'Exam Hall 1', 'Auditorium', 80, 80, 'Common / Shared', '["Whiteboard"]', '["Wheelchair Accessible","Special Seating"]', 0, 1, 0, 'Active'
 ) AS candidate
 WHERE NOT EXISTS (
-    SELECT 1 FROM rooms r WHERE r.name = candidate.name
+    SELECT 1 FROM rooms r WHERE r.room_code = candidate.room_code
 );

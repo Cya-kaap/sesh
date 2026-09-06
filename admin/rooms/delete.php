@@ -19,7 +19,8 @@ require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../includes/functions.php';
 
-requireRole(['Admin']);
+requireLogin();
+requireWritePermission(FEATURE_ROOMS_MANAGE);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: index.php');
@@ -46,7 +47,7 @@ $bookingCheck = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_id = :id
 $bookingCheck->execute([':id' => $roomId]);
 
 if ((int) $bookingCheck->fetchColumn() > 0) {
-    setFlash('error', 'This room cannot be deleted because it has existing bookings. Set its status to "Unavailable" instead.');
+    setFlash('error', 'This room cannot be deleted because it has existing bookings. Set its status to "Inactive" instead.');
     header('Location: index.php');
     exit;
 }

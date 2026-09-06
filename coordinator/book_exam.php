@@ -14,26 +14,23 @@
  *   Coordinator only.
  *
  * Approval note:
- *   Bookings created here are inserted with status = 'Pending', NOT
- *   'Approved'. The Coordinator is not the final approving authority —
- *   an Admin must review the request (date, time, room, purpose) at
- *   admin/bookings/index.php and explicitly approve or reject it. The
- *   room is only officially secured once an Admin sets status to
- *   'Approved'. (Earlier version of this file inserted directly as
- *   'Approved'; that was changed per updated workflow requirements.)
+ *   Coordinator examination bookings are inserted as 'Approved' after
+ *   server-side conflict and capacity validation. Faculty-created
+ *   bookings remain 'Pending' and enter the approval workflow.
  */
 
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-requireRole(['Coordinator']);
+requireLogin();
+requirePermission(FEATURE_BOOKINGS_EXAM_CREATE);
 
 $user = currentUser();
 
 $rooms = $pdo->query("
-    SELECT id, name, type, capacity FROM rooms
-    WHERE status = 'Available'
+    SELECT id, room_code, name, building, floor, type, capacity, exam_capacity, primary_department, amenities, accessibility, has_projector, has_whiteboard, has_ac FROM rooms
+    WHERE status = 'Active'
     ORDER BY name ASC
 ")->fetchAll();
 
@@ -168,13 +165,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Capacity check
-        if (empty($errors) && $selectedRoom && (int) $values['num_students'] > (int) $selectedRoom['capacity']) {
-            $errors[] = "Number of students ({$values['num_students']}) exceeds the room's capacity ({$selectedRoom['capacity']}).";
+        if (empty($errors) && $selectedRoom && (int) $values['num_students'] > (int) ($selectedRoom['exam_capacity'] ?: $selectedRoom['capacity'])) {
+            $examCapacity = (int) ($selectedRoom['exam_capacity'] ?: $selectedRoom['capacity']);
+            $errors[] = "Number of students ({$values['num_students']}) exceeds the room's examination capacity ({$examCapacity}).";
         }
 
         // Conflict check — shared helper (includes/functions.php).
-        if (empty($errors) && hasBookingConflict($pdo, (int) $values['room_id'], $values['date'], $values['start_time'], $values['end_time'])) {
-            $errors[] = 'This room is already booked during the selected time window. Choose a different room or time.';
+        $conflict = null;
+        if (empty($errors)) {
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+            $pdo->beginTransaction();
+            $conflict = findBookingConflict($pdo, (int) $values['room_id'], $values['date'], $values['start_time'], $values['end_time'], null, true);
+        }
+        if ($conflict) {
+            $pdo->rollBack();
+            $errors[] = sprintf(
+                'This room is already approved for %s on %s from %s to %s (%s, %s).',
+                $conflict['room_name'], $conflict['date'], $conflict['start_time'],
+                $conflict['end_time'], $conflict['type'], $conflict['programme_name']
+            );
         }
 
         // Insert
@@ -188,7 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ) VALUES (
                     :room_id, :user_id, :programme_id, :semester_id,
                     :date, :start_time, :end_time, 'Exam', :purpose,
-                    :exam_name, :subject, :invigilator_name, :num_students, 'Pending'
+                    :exam_name, :subject, :invigilator_name, :num_students, 'Approved'
                 )
             ");
 
@@ -206,6 +215,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':invigilator_name' => $values['invigilator_name'],
                 ':num_students'     => (int) $values['num_students'],
             ]);
+
+            $examInsert = $pdo->prepare("INSERT INTO exam_details (booking_id, exam_name, subject, invigilator_name, num_students) VALUES (:booking_id, :exam_name, :subject, :invigilator_name, :num_students)");
+            $examInsert->execute([
+                ':booking_id' => (int) $pdo->lastInsertId(),
+                ':exam_name' => $values['exam_name'],
+                ':subject' => $values['subject'],
+                ':invigilator_name' => $values['invigilator_name'],
+                ':num_students' => (int) $values['num_students'],
+            ]);
+
+            $pdo->commit();
 
             setFlash('success', 'Exam "' . $values['exam_name'] . '" submitted for approval. An Admin will review the room, date and time before it is confirmed.');
             header('Location: index.php');
@@ -331,15 +351,27 @@ $csrfToken = generateCsrfToken();
             </div>
 
             <div class="full">
+                <label>Filter rooms</label>
+                <div class="filter-chips">
+                    <label><input type="text" id="filter_room_type" placeholder="Room type"></label>
+                    <label><input type="text" id="filter_department" placeholder="Department"></label>
+                    <label><input type="checkbox" id="filter_projector"> Projector</label>
+                    <label><input type="checkbox" id="filter_whiteboard"> Whiteboard</label>
+                    <label><input type="checkbox" id="filter_ac"> AC</label>
+                </div>
+            </div>
+
+            <div class="full">
                 <label for="room_id">Room</label>
                 <select id="room_id" name="room_id" required>
                     <option value="">Select room</option>
                     <?php foreach ($rooms as $r): ?>
                         <option value="<?= (int) $r['id'] ?>" <?= (string) $r['id'] === $values['room_id'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($r['name']) ?> — <?= htmlspecialchars($r['type']) ?> (cap. <?= (int) $r['capacity'] ?>)
+                            <?= htmlspecialchars($r['name'] ?: $r['room_code']) ?> [<?= htmlspecialchars($r['room_code']) ?>] — <?= htmlspecialchars($r['type']) ?> (cap. <?= (int) $r['capacity'] ?>, exam cap. <?= (int) ($r['exam_capacity'] ?: $r['capacity']) ?>, <?= htmlspecialchars($r['primary_department']) ?>)
                         </option>
                     <?php endforeach; ?>
                 </select>
+                <p><a id="room-details-link" href="../modules/rooms/view.php" target="_blank" rel="noopener" hidden>View room details, photos, amenities and accessibility</a></p>
             </div>
             <p class="room-hint">Only rooms currently marked "Available" are listed. Capacity is checked against Number of Students.</p>
 
@@ -382,6 +414,46 @@ $csrfToken = generateCsrfToken();
 
     const programmeSelect = document.getElementById('programme_id');
     const semesterSelect  = document.getElementById('semester_id');
+    const roomSelect = document.getElementById('room_id');
+    const roomDetailsLink = document.getElementById('room-details-link');
+    const allRooms = <?= json_encode($rooms) ?>;
+    const preselectedRoomId = <?= json_encode($values['room_id'] !== '' ? (int) $values['room_id'] : null) ?>;
+    const filterRoomType = document.getElementById('filter_room_type');
+    const filterDepartment = document.getElementById('filter_department');
+    const filterProjector = document.getElementById('filter_projector');
+    const filterWhiteboard = document.getElementById('filter_whiteboard');
+    const filterAc = document.getElementById('filter_ac');
+
+    function populateRooms() {
+        const roomType = filterRoomType.value.toLowerCase().trim();
+        const department = filterDepartment.value.toLowerCase().trim();
+        const filtered = allRooms.filter(function (room) {
+            if (roomType && room.type.toLowerCase().indexOf(roomType) === -1) return false;
+            if (department && room.primary_department.toLowerCase().indexOf(department) === -1) return false;
+            if (filterProjector.checked && !room.has_projector) return false;
+            if (filterWhiteboard.checked && !room.has_whiteboard) return false;
+            if (filterAc.checked && !room.has_ac) return false;
+            return true;
+        });
+        roomSelect.innerHTML = '<option value="">Select room</option>';
+        filtered.forEach(function (room) {
+            const option = document.createElement('option');
+            option.value = room.id;
+            option.textContent = (room.name || room.room_code) + ' [' + room.room_code + '] - ' + room.type + ' (cap. ' + room.capacity + ', exam cap. ' + (room.exam_capacity || room.capacity) + ', ' + room.primary_department + ')';
+            if (preselectedRoomId !== null && Number(room.id) === preselectedRoomId) option.selected = true;
+            roomSelect.appendChild(option);
+        });
+        updateRoomDetailsLink();
+    }
+
+    function updateRoomDetailsLink() {
+        if (roomSelect.value) {
+            roomDetailsLink.href = '../modules/rooms/view.php?id=' + encodeURIComponent(roomSelect.value);
+            roomDetailsLink.hidden = false;
+        } else {
+            roomDetailsLink.hidden = true;
+        }
+    }
 
     function populateSemesters() {
         const programmeId = programmeSelect.value;
@@ -406,12 +478,16 @@ $csrfToken = generateCsrfToken();
     }
 
     programmeSelect.addEventListener('change', populateSemesters);
+    [filterRoomType, filterDepartment].forEach(function (field) { field.addEventListener('input', populateRooms); });
+    [filterProjector, filterWhiteboard, filterAc].forEach(function (field) { field.addEventListener('change', populateRooms); });
+    roomSelect.addEventListener('change', updateRoomDetailsLink);
 
     // Re-populate on load so a validation-error reload keeps the
     // previously selected programme's semester list (and selection).
     if (programmeSelect.value) {
         populateSemesters();
     }
+    populateRooms();
 </script>
 
 </body>

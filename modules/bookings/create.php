@@ -4,7 +4,11 @@ require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../includes/functions.php';
 
-requirePermission(FEATURE_BOOKINGS_CLASS_CREATE);
+requireLogin();
+if (!(hasPermission(FEATURE_BOOKINGS_CLASS_CREATE) || hasPermission(FEATURE_BOOKINGS_EXAM_CREATE))) {
+    header('Location: ' . basePath('unauthorized.php'));
+    exit;
+}
 
 $user = currentUser();
 
@@ -19,12 +23,16 @@ $form = [
     'end_time'     => '',
     'type'         => '',
     'purpose'      => '',
+    'subject'      => '',
+    'exam_name'    => '',
+    'invigilator_name' => '',
+    'num_students' => '',
 ];
 
 $rooms = $pdo->query("
-    SELECT id, name, capacity
+    SELECT id, room_code, name, type, capacity, exam_capacity, primary_department, amenities, accessibility, has_projector, has_whiteboard, has_ac
     FROM rooms
-    WHERE status = 'Available'
+    WHERE status = 'Active'
     ORDER BY name
 ")->fetchAll();
 
@@ -64,6 +72,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $end_time     = $form['end_time'];
     $type         = $form['type'];
     $purpose      = $form['purpose'];
+    $selectedRoom = null;
+
+    foreach ($rooms as $room) {
+        if ((int) $room['id'] === $room_id) {
+            $selectedRoom = $room;
+            break;
+        }
+    }
 
     if ($room_id <= 0) {
         $errors[] = 'Please select a room.';
@@ -97,8 +113,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Please select the session type.';
     }
 
+    if (!in_array($type, ['Class', 'Exam'], true)) {
+        $errors[] = 'Please select a valid session type.';
+    }
+
+    if ($type === 'Exam' && !hasPermission(FEATURE_BOOKINGS_EXAM_CREATE)) {
+        $errors[] = 'You do not have permission to create examination bookings.';
+    }
+    if ($type === 'Class' && !hasPermission(FEATURE_BOOKINGS_CLASS_CREATE)) {
+        $errors[] = 'You do not have permission to create class bookings.';
+    }
+
     if ($purpose === '') {
         $errors[] = 'Please enter the purpose.';
+    }
+
+    if ($type === 'Exam') {
+        foreach (['exam_name' => 'Exam name', 'subject' => 'Subject', 'invigilator_name' => 'Invigilator name', 'num_students' => 'Number of students'] as $key => $label) {
+            if ($form[$key] === '') {
+                $errors[] = "$label is required for examination bookings.";
+            }
+        }
+        if ($form['num_students'] !== '' && (!ctype_digit($form['num_students']) || (int) $form['num_students'] < 1)) {
+            $errors[] = 'Number of students must be a whole number of 1 or more.';
+        }
+        if ($selectedRoom && (int) $form['num_students'] > (int) ($selectedRoom['exam_capacity'] ?: $selectedRoom['capacity'])) {
+            $examCapacity = (int) ($selectedRoom['exam_capacity'] ?: $selectedRoom['capacity']);
+            $errors[] = "Number of students ({$form['num_students']}) exceeds the room's examination capacity ({$examCapacity}).";
+        }
     }
 
     if ($date !== '') {
@@ -110,14 +152,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    $conflict = null;
     if (empty($errors)) {
-        if (hasBookingConflict($pdo, $room_id, $date, $start_time, $end_time)) {
-            $errors[] = 'This room is already booked or has a pending booking during the selected time.';
-        }
+        $pdo->exec('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+        $pdo->beginTransaction();
+        $conflict = findBookingConflict($pdo, $room_id, $date, $start_time, $end_time, null, true);
+    }
+    if ($conflict) {
+        $pdo->rollBack();
+        $errors[] = sprintf(
+            'This room is already approved for %s on %s from %s to %s (%s, %s).',
+            $conflict['room_name'], $conflict['date'], $conflict['start_time'],
+            $conflict['end_time'], $conflict['type'], $conflict['programme_name']
+        );
     }
 
     if (empty($errors)) {
 
+        $status = in_array($user['role'], [ROLE_ADMIN, ROLE_COORDINATOR], true) ? 'Approved' : 'Pending';
         $insert = $pdo->prepare("
             INSERT INTO bookings
             (
@@ -130,6 +182,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 end_time,
                 type,
                 purpose,
+                subject,
+                exam_name,
+                invigilator_name,
+                num_students,
                 status
             )
             VALUES
@@ -143,7 +199,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 :end_time,
                 :type,
                 :purpose,
-                'Pending'
+                :subject,
+                :exam_name,
+                :invigilator_name,
+                :num_students,
+                :status
             )
         ");
 
@@ -157,7 +217,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':end_time'     => $end_time,
             ':type'         => $type,
             ':purpose'      => $purpose,
+            ':subject'      => $form['subject'] !== '' ? $form['subject'] : null,
+            ':exam_name'    => $type === 'Exam' ? $form['exam_name'] : null,
+            ':invigilator_name' => $type === 'Exam' ? $form['invigilator_name'] : null,
+            ':num_students' => $type === 'Exam' ? (int) $form['num_students'] : null,
+            ':status'       => $status,
         ]);
+
+        if ($type === 'Exam') {
+            $examInsert = $pdo->prepare("INSERT INTO exam_details (booking_id, exam_name, subject, invigilator_name, num_students) VALUES (:booking_id, :exam_name, :subject, :invigilator_name, :num_students)");
+            $examInsert->execute([
+                ':booking_id' => (int) $pdo->lastInsertId(),
+                ':exam_name' => $form['exam_name'],
+                ':subject' => $form['subject'],
+                ':invigilator_name' => $form['invigilator_name'],
+                ':num_students' => (int) $form['num_students'],
+            ]);
+        }
+
+        $pdo->commit();
 
         setFlash('success', 'Booking request submitted successfully.');
         header('Location: list.php?success=created');
@@ -179,6 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <title>New Booking | SESH</title>
 
     <link rel="stylesheet" href="../../assets/css/style.css">
+    <style>.exam-only { display: none; }</style>
 
 </head>
 
@@ -217,8 +296,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     value="<?= (int)$room['id'] ?>"
                     <?= (string)$form['room_id'] === (string)$room['id'] ? 'selected' : '' ?>
                 >
-                    <?= htmlspecialchars($room['name']) ?>
-                    — Capacity <?= (int)$room['capacity'] ?>
+                    <?= htmlspecialchars($room['name'] ?: $room['room_code']) ?> [<?= htmlspecialchars($room['room_code']) ?>]
+                    — <?= htmlspecialchars($room['type']) ?>, Capacity <?= (int)$room['capacity'] ?>
+                    — Exam Capacity <?= (int) ($room['exam_capacity'] ?: $room['capacity']) ?>
+                    — <?= htmlspecialchars($room['primary_department']) ?>
                 </option>
 
             <?php endforeach; ?>
@@ -328,6 +409,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             required
         ><?= htmlspecialchars($form['purpose']) ?></textarea>
 
+         <label for="subject">Subject</label>
+         <input type="text" id="subject" name="subject" maxlength="100"
+             value="<?= htmlspecialchars($form['subject']) ?>">
+
+         <div class="exam-only">
+             <label for="exam_name">Exam Name</label>
+             <input type="text" id="exam_name" name="exam_name" maxlength="150"
+                 value="<?= htmlspecialchars($form['exam_name']) ?>">
+
+             <label for="invigilator_name">Invigilator Name</label>
+             <input type="text" id="invigilator_name" name="invigilator_name" maxlength="100"
+                 value="<?= htmlspecialchars($form['invigilator_name']) ?>">
+
+             <label for="num_students">Expected Students</label>
+             <input type="number" id="num_students" name="num_students" min="1"
+                 value="<?= htmlspecialchars($form['num_students']) ?>">
+         </div>
+
 
         <button type="submit">
             Submit Booking Request
@@ -336,6 +435,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </form>
 
 </div>
+
+<script>
+    const typeSelect = document.getElementById('type');
+    const examSection = document.querySelector('.exam-only');
+    const bookingForm = document.querySelector('form');
+
+    function toggleExamSection() {
+        const isExam = typeSelect.value === 'Exam';
+        examSection.style.display = isExam ? 'block' : 'none';
+        examSection.querySelectorAll('input').forEach(function (input) {
+            input.required = isExam;
+        });
+    }
+
+    typeSelect.addEventListener('change', toggleExamSection);
+    bookingForm.addEventListener('submit', function (event) {
+        const start = document.getElementById('start_time').value;
+        const end = document.getElementById('end_time').value;
+        const errors = [];
+
+        if (start && end && start >= end) {
+            errors.push('End time must be after start time.');
+        }
+        if (typeSelect.value === 'Exam') {
+            ['exam_name', 'subject', 'invigilator_name', 'num_students'].forEach(function (id) {
+                if (!document.getElementById(id).value.trim()) {
+                    errors.push('All examination fields are required.');
+                }
+            });
+        }
+        if (errors.length) {
+            event.preventDefault();
+            window.alert([...new Set(errors)].join('\n'));
+        }
+    });
+    toggleExamSection();
+</script>
 
 </body>
 

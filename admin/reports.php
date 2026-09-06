@@ -26,7 +26,8 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-requireRole(['Admin']);
+requireLogin();
+requirePermission(FEATURE_REPORTS_VIEW);
 
 $defaultFrom = date('Y-m-01');
 $defaultTo   = date('Y-m-t');

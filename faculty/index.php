@@ -18,7 +18,8 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-requireRole(['Faculty']);
+requireLogin();
+requirePermission(FEATURE_BOOKINGS_CLASS_CREATE);
 
 $user = currentUser();
 
@@ -156,6 +157,18 @@ $pendingFeedback = $pendingFeedbackStmt->fetchAll();
                 <small>02 / HISTORY</small>
                 <h3>My Bookings</h3>
                 <p>View your booking history, filter by date, and submit feedback for completed sessions.</p>
+            </a>
+
+            <a href="../modules/timetable/index.php" class="module-card">
+                <small>03 / TIMETABLE</small>
+                <h3>Weekly Timetable</h3>
+                <p>See approved classes and examinations arranged by day and programme.</p>
+            </a>
+
+            <a href="../modules/rooms/list.php" class="module-card">
+                <small>04 / ROOMS</small>
+                <h3>Room Directory</h3>
+                <p>View room capacity, resources, amenities, accessibility, photos and floor plans.</p>
             </a>
 
         </section>

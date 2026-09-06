@@ -20,7 +20,8 @@ require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../includes/functions.php';
 
-requireRole(['Admin']);
+requireLogin();
+requirePermission(FEATURE_PROGRAMMES_MANAGE);
 
 $flash = getFlash();
 

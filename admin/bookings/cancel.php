@@ -18,7 +18,8 @@ require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../includes/functions.php';
 
-requireRole(['Admin']);
+requireLogin();
+requireWritePermission(FEATURE_BOOKINGS_CANCEL);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: index.php');

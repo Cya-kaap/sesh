@@ -1,5 +1,12 @@
 <?php
 
+require_once __DIR__ . '/../../includes/auth_check.php';
+
+requirePermission(FEATURE_ROOMS_MANAGE);
+
+header('Location: ' . basePath('modules/rooms/list.php'));
+exit;
+
 /**
  * SESH - Admin: Booking Overrides & Management
  *
@@ -20,7 +27,8 @@ require_once __DIR__ . '/../../config/db.php';
 require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../includes/functions.php';
 
-requireRole(['Admin']);
+requireLogin();
+requirePermission(FEATURE_ROOMS_MANAGE);
 
 $user  = currentUser();
 $flash = getFlash();

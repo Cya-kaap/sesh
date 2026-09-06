@@ -9,9 +9,14 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-requireRole(['Admin']);
+requireLogin();
+requirePermission(FEATURE_USERS_MANAGE);
 $currentUser = currentUser();
 $flash = getFlash();
+$todayBookings = (int) $pdo->query("SELECT COUNT(*) FROM bookings WHERE date = CURDATE() AND status IN ('Approved', 'Completed')")->fetchColumn();
+$pendingApprovals = (int) $pdo->query("SELECT COUNT(*) FROM bookings WHERE status = 'Pending'")->fetchColumn();
+$activeRooms = (int) $pdo->query("SELECT COUNT(*) FROM rooms WHERE status = 'Active'")->fetchColumn();
+$roomsInUseToday = (int) $pdo->query("SELECT COUNT(DISTINCT room_id) FROM bookings WHERE date = CURDATE() AND status = 'Approved'")->fetchColumn();
 
 ?>
 <!DOCTYPE html>
@@ -36,6 +41,10 @@ $flash = getFlash();
         .flash { margin-top: 30px; padding: 14px 18px; font-size: 13px; }
         .flash-success { background: #111; color: #fff; }
         .flash-error { background: #a33; color: #fff; }
+        .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:35px 0; }
+        .stat-card { padding:22px; background:#fff; border:1px solid #ddd; text-decoration:none; color:#111; }
+        .stat-card small { display:block; color:#777; font-size:9px; letter-spacing:.12em; font-weight:700; }
+        .stat-value { margin-top:12px; font-size:34px; font-weight:800; }
         
         /* Grid Layout for Module Cards */
         .module-grid {
@@ -103,6 +112,13 @@ $flash = getFlash();
             <div class="flash flash-error"><?= htmlspecialchars($flash['error'], ENT_QUOTES, 'UTF-8') ?></div>
         <?php endif; ?>
 
+        <section class="stat-grid">
+            <div class="stat-card"><small>TODAY'S BOOKINGS</small><div class="stat-value"><?= $todayBookings ?></div></div>
+            <a class="stat-card" href="bookings/index.php"><small>PENDING APPROVALS</small><div class="stat-value"><?= $pendingApprovals ?></div></a>
+            <div class="stat-card"><small>ACTIVE ROOMS</small><div class="stat-value"><?= $activeRooms ?></div></div>
+            <div class="stat-card"><small>ROOMS IN USE TODAY</small><div class="stat-value"><?= $roomsInUseToday ?></div></div>
+        </section>
+
         <section class="module-grid">
 
             <a href="rooms/index.php" class="module-card">
@@ -133,6 +149,18 @@ $flash = getFlash();
                 <small>05 / REPORTS</small>
                 <h3>Utilization Reports</h3>
                 <p>Room utilization, booking status breakdown, and reported condition issues.</p>
+            </a>
+
+            <a href="../modules/timetable/index.php" class="module-card">
+                <small>06 / TIMETABLE</small>
+                <h3>Weekly Timetable</h3>
+                <p>View approved classes and examinations by week, room and programme.</p>
+            </a>
+
+            <a href="settings/booking.php" class="module-card">
+                <small>07 / POLICY</small>
+                <h3>Booking Rules</h3>
+                <p>Configure duration limits, advance booking, approvals, and blackout periods.</p>
             </a>
 
         </section>

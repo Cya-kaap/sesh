@@ -23,7 +23,8 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-requireRole(['Coordinator']);
+requireLogin();
+requirePermission(FEATURE_BOOKINGS_CANCEL);
 
 $user  = currentUser();
 $flash = getFlash();
@@ -100,19 +101,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'], $_POST['id'
         $bookingId = (int) $_POST['id'];
         $newStatus = $_POST['action'] === 'approve' ? 'Approved' : 'Rejected';
 
-        $check = $pdo->prepare("SELECT status, room_id, date, start_time, end_time FROM bookings WHERE id = :id AND programme_id = :pid");
+        $pdo->exec('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+        $pdo->beginTransaction();
+
+        $check = $pdo->prepare("SELECT status, room_id, date, start_time, end_time FROM bookings WHERE id = :id AND programme_id = :pid FOR UPDATE");
         $check->execute([':id' => $bookingId, ':pid' => $programme['id']]);
         $current = $check->fetch();
 
         if (!$current) {
+            $pdo->rollBack();
             setFlash('error', 'Booking not found in your programme scope.');
         } elseif ($current['status'] !== 'Pending') {
+            $pdo->rollBack();
             setFlash('error', 'Only pending bookings can be approved or rejected.');
-        } elseif ($newStatus === 'Approved' && hasBookingConflict($pdo, (int) $current['room_id'], $current['date'], $current['start_time'], $current['end_time'], $bookingId)) {
+        } elseif ($newStatus === 'Approved' && findBookingConflict($pdo, (int) $current['room_id'], $current['date'], $current['start_time'], $current['end_time'], $bookingId, true)) {
+            $pdo->rollBack();
             setFlash('error', 'Cannot approve — this room now conflicts with another booking.');
         } else {
             $update = $pdo->prepare("UPDATE bookings SET status = :status, updated_at = NOW() WHERE id = :id");
             $update->execute([':status' => $newStatus, ':id' => $bookingId]);
+            $pdo->commit();
             setFlash('success', "Booking {$newStatus}.");
         }
     }
@@ -148,11 +156,15 @@ $whereSql = implode(' AND ', $where);
 $stmt = $pdo->prepare("
     SELECT
         b.id, b.date, b.start_time, b.end_time, b.type, b.purpose,
-        b.exam_name, b.subject, b.invigilator_name, b.num_students, b.status,
+        COALESCE(ed.exam_name, b.exam_name) AS exam_name,
+        COALESCE(ed.subject, b.subject) AS subject,
+        COALESCE(ed.invigilator_name, b.invigilator_name) AS invigilator_name,
+        COALESCE(ed.num_students, b.num_students) AS num_students, b.status,
         r.name AS room_name, r.type AS room_type,
         u.full_name AS booked_by, u.role AS booked_by_role,
         s.number AS semester_number
     FROM bookings b
+    LEFT JOIN exam_details ed ON ed.booking_id = b.id
     JOIN rooms r ON b.room_id = r.id
     JOIN users u ON b.user_id = u.id
     JOIN semesters s ON b.semester_id = s.id
