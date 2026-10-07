@@ -1,0 +1,250 @@
+/* filename: css/style.css */
+
+/* Typography and page headings */
+h1,
+h2,
+h3 {
+	margin-top: 0;
+	font-family: Georgia, serif;
+	font-weight: normal;
+}
+
+.page-head {
+	display: flex;
+	align-items: end;
+	justify-content: space-between;
+	gap: 20px;
+	margin-bottom: 28px;
+}
+
+.page-head h1 {
+	margin-bottom: 6px;
+	font-size: clamp(2rem, 4vw, 3.4rem);
+}
+
+.muted {
+	color: var(--muted);
+}
+
+/* Cards and dashboard statistics */
+.grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+	gap: 16px;
+}
+
+.card,
+.panel {
+	padding: 22px;
+	background: #fffdf8;
+	border: 1px solid var(--line);
+}
+
+.stat {
+	color: var(--gold);
+	font: 2.5rem Georgia, serif;
+}
+
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin: 18px 0;
+}
+
+/* Buttons and form controls */
+.button,
+button {
+	display: inline-block;
+	padding: 11px 16px;
+	border: 0;
+	background: #111111;
+	color: var(--gold);
+	font: 14px Arial, sans-serif;
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.button.alt {
+	background: #be573f;
+}
+
+.button.light {
+	background: #efe5c6;
+	color: #171717;
+}
+
+form.inline {
+	display: inline;
+}
+
+label {
+	display: block;
+	margin: 12px 0;
+	color: var(--muted);
+	font-size: 14px;
+}
+
+label small,
+small {
+	display: block;
+	margin-top: 4px;
+	color: var(--muted);
+	font-size: 12px;
+}
+
+input,
+select,
+textarea {
+	display: block;
+	width: 100%;
+	margin-top: 6px;
+	padding: 10px;
+	border: 1px solid #c5beae;
+	background: #fffdf8;
+	font: inherit;
+}
+
+textarea {
+	min-height: 90px;
+}
+
+.email-input,
+.password-input {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.email-input input,
+.password-input input {
+	flex: 1;
+}
+
+.email-input span {
+	padding: 10px;
+	background: #efe5c6;
+	color: #171717;
+	white-space: nowrap;
+}
+
+.password-input .button {
+	margin: 6px 0 0;
+	white-space: nowrap;
+}
+
+.eye-icon {
+	width: 20px;
+	height: 20px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.eye-slash {
+	display: none;
+}
+
+.password-visible .eye-slash {
+	display: block;
+}
+
+.password-strength {
+	display: block;
+	margin-top: 6px;
+}
+
+.password-strength:empty {
+	display: none;
+}
+
+/* Tables and status badges */
+table {
+	width: 100%;
+	border-collapse: collapse;
+	background: #fffdf8;
+}
+
+th,
+td {
+	padding: 12px;
+	border-bottom: 1px solid var(--line);
+	text-align: left;
+	vertical-align: top;
+}
+
+th {
+	color: var(--muted);
+	font-size: 11px;
+	letter-spacing: .08em;
+	text-transform: uppercase;
+}
+
+.table-wrap {
+	overflow: auto;
+}
+
+.badge {
+	display: inline-block;
+	padding: 4px 8px;
+	background: #eee9dc;
+	font-size: 11px;
+}
+
+.badge.Pending {
+	background: #f1e3bd;
+}
+
+.badge.Approved {
+	background: #e7dbb5;
+}
+
+.badge.Rejected,
+.badge.Cancelled {
+	background: #f4d4cc;
+}
+
+/* Timetable and booking filters */
+.timetable td {
+	min-width: 130px;
+	height: 72px;
+}
+
+.slot {
+	padding: 8px;
+	background: #eee6cf;
+	font-size: 13px;
+}
+
+.danger {
+	color: #a0392c;
+}
+
+.searchbar {
+	display: grid;
+	grid-template-columns: 1fr 1fr auto;
+	align-items: end;
+	gap: 12px;
+	margin-bottom: 20px;
+}
+
+@media (max-width: 700px) {
+	.page-head {
+		display: block;
+	}
+
+	.searchbar {
+		grid-template-columns: 1fr;
+	}
+
+	.page-head .actions {
+		margin-top: 14px;
+	}
+
+	.email-input span {
+		padding: 10px 6px;
+		font-size: 13px;
+	}
+}
